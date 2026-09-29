@@ -1,0 +1,13 @@
+[package]
+name = "silica"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.ostd]
+version = "0.18.1"
+
+[dependencies.bitflags]
+version = "2"
+
+[dependencies.spin]
+version = "0.9.8"

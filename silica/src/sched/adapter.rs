@@ -43,7 +43,6 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 
 use ostd::{
     cpu::{CpuId, PinCurrentCpu, num_cpus},
-    power::{ExitCode, poweroff},
     sync::SpinLock,
     task::{
         Task, TaskOptions, disable_preempt, halt_cpu,
@@ -389,9 +388,6 @@ pub(super) fn forget_entity(task: &Task) {
 /// stopping belongs.
 fn idle_task() {
     loop {
-        if is_system_idle() {
-            poweroff(ExitCode::Success);
-        }
         halt_cpu();
     }
 }

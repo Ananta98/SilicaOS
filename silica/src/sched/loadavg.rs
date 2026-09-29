@@ -234,7 +234,7 @@ impl core::fmt::Display for LoadAvg {
             // an average which is as close to a whole number as the fixed point
             // can hold still prints as that whole number.
             let thousandths =
-                (value * 1000 + LOAD_AVG_SCALE / 2) / LOAD_AVG_SCALE;
+                (((*value as u128) * 1000 + (LOAD_AVG_SCALE as u128) / 2) / (LOAD_AVG_SCALE as u128)) as u64;
             write!(f, "{}.{:02}", thousandths / 1000, (thousandths % 1000) / 10)?;
         }
         Ok(())

@@ -61,22 +61,22 @@ use super::{Entity, NSEC_PER_TICK, now, stats::CpuStats};
 /// on one CPU and run on another is queued twice, and the time spent waiting
 /// for a CPU is a property of a wait, not of a task.
 #[derive(Clone)]
-pub(super) struct Entry {
+pub struct Entry {
     /// The task.
-    task: Arc<Task>,
+    pub(crate) task: Arc<Task>,
     /// The task's scheduling state.
-    entity: Arc<Entity>,
+    pub(crate) entity: Arc<Entity>,
     /// The tick at which the task joined this runqueue, which is when its
     /// wait for the CPU started.
-    arrival: u64,
+    pub(crate) arrival: u64,
     /// Whether this is the runqueue's idle task, which runs only when nothing
     /// else can.
-    is_idle: bool,
+    pub(crate) is_idle: bool,
 }
 
 impl Entry {
     /// Creates an entry for `task` that joined the runqueue at tick `arrival`.
-    pub(super) fn new(task: Arc<Task>, entity: Arc<Entity>, arrival: u64) -> Self {
+    pub fn new(task: Arc<Task>, entity: Arc<Entity>, arrival: u64) -> Self {
         Self {
             task,
             entity,
@@ -91,7 +91,7 @@ impl Entry {
     /// directly, so it must never be woken, and nothing may be scheduled in its
     /// place. That is what its weight of zero and the runqueue's exclusion of
     /// it are for.
-    pub(super) fn idle(task: Arc<Task>, entity: Arc<Entity>) -> Self {
+    pub fn idle(task: Arc<Task>, entity: Arc<Entity>) -> Self {
         Self {
             task,
             entity,
@@ -101,8 +101,18 @@ impl Entry {
     }
 
     /// Returns the task.
-    pub(super) fn into_task(self) -> Arc<Task> {
+    pub fn into_task(self) -> Arc<Task> {
         self.task
+    }
+
+    /// Returns a reference to the task.
+    pub fn task(&self) -> &Arc<Task> {
+        &self.task
+    }
+
+    /// Returns a reference to the entity.
+    pub fn entity(&self) -> &Arc<Entity> {
+        &self.entity
     }
 }
 
@@ -324,6 +334,9 @@ impl RunQueue {
         } else {
             self.stats.ran(delta_ns);
         }
+        if before == self.min_vruntime {
+            self.advance_min_vruntime();
+        }
     }
 
     /// Places `entry` in the runqueue at the position its lag earns it.
@@ -352,18 +365,23 @@ impl RunQueue {
         // arithmetic is the solution of `V_after = mean(V_before, v)` for `v`.
         let weight = entry.entity.weight() as i64;
         let total = self.sum_weight as i64;
-        let lag = if total == 0 || weight == 0 {
+        let scaled_lag = if total == 0 || weight == 0 {
             // Nothing to be late for, or a task that is not in the mean at all.
             lag
         } else {
-            lag * (total + weight) / total
+            ((lag as i128 * (total as i128 + weight as i128)) / total as i128) as i64
         };
-        let vruntime = (self.avg_vruntime() as i64)
-            .saturating_sub(lag)
-            .max(0) as u64;
-        entry
-            .entity
-            .set_vruntime(vruntime.max(self.min_vruntime));
+        let base_vruntime = self.avg_vruntime();
+        let vruntime = (base_vruntime as i128 - scaled_lag as i128).max(0) as u64;
+
+        if self.sum_weight == 0 {
+            self.min_vruntime = vruntime;
+            entry.entity.set_vruntime(vruntime);
+        } else {
+            entry
+                .entity
+                .set_vruntime(vruntime.max(self.min_vruntime));
+        }
         entry.entity.set_placed();
         self.insert(entry, false);
         self.has_run_tasks = true;

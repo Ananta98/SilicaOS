@@ -81,11 +81,10 @@
 //! the timer would sharpen the decisions as well, and `now` is the one place that
 //! would have to change.
 //! 
-mod adapter;
-mod entity;
+pub mod adapter;
+pub mod entity;
 pub mod loadavg;
-mod rq;
-pub mod selftest;
+pub mod rq;
 pub mod stats;
 
 use ostd::timer::{Jiffies, TIMER_FREQ};

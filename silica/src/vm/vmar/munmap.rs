@@ -34,11 +34,7 @@ impl Vmar {
         check_page_aligned_range(&range)?;
 
         if advice == MadviseAdvice::WillNeed {
-            // `madvise` reports no error for a hint that could not be honoured,
-            // so a failure here is only worth a log line.
-            if let Err(errno) = self.populate_range(&range) {
-                ostd::warn!("MADV_WILLNEED for {range:#x?} failed: {errno}");
-            }
+            let _ = self.populate_range(&range);
             return Ok(());
         }
 

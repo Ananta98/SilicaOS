@@ -18,6 +18,12 @@
 
 extern crate alloc;
 
+macro_rules! __log_prefix {
+    () => {
+        ""
+    };
+}
+
 #[cfg_attr(target_arch = "x86_64", path = "arch/x86_64/mod.rs")]
 pub mod arch;
 

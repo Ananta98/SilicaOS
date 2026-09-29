@@ -9,7 +9,7 @@ pub fn initramfs_init() {
 
     if let Some(initramfs_buf) = boot_info.initramfs {
         ostd::info!("Found initramfs image ({} bytes)", initramfs_buf.len());
-        let archive = utils::cpio::CpioArchive::new(initramfs_buf);
+        let archive = CpioArchive::new(initramfs_buf);
         let mut count = 0;
         for entry in archive {
             match entry {

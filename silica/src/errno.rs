@@ -173,9 +173,6 @@ pub type Result<T, E = Errno> = core::result::Result<T, E>;
 
 /// Returns early with an [`Errno`].
 ///
-/// The optional trailing arguments are logged, so that the reason for a failure
-/// is not lost even though the errno itself carries only a number.
-///
 /// ```ignore
 /// return_errno!(EINVAL, "offset {:#x} is not page-aligned", offset);
 /// return_errno!(ENOMEM);
@@ -186,7 +183,7 @@ macro_rules! return_errno {
         return ::core::result::Result::Err($crate::errno::Errno::$errno)
     };
     ($errno:ident, $($arg:tt)+) => {{
-        ::ostd::error!("{}: {}", stringify!($errno), ::core::format_args!($($arg)+));
+        let _ = ::core::format_args!($($arg)+);
         return ::core::result::Result::Err($crate::errno::Errno::$errno);
     }};
 }

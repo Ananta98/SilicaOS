@@ -532,7 +532,6 @@ mod tests {
                 Some(AT + PAGE_SIZE),
             )
             .unwrap_err();
-        ostd::warn!("BREADCRUMB got {err}");
         assert_eq!(err, Errno::EINVAL);
     }
 

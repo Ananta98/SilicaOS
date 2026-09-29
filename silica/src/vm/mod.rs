@@ -41,7 +41,7 @@ use ostd::{
     mm::fault::inject_user_page_fault_handler,
     task::{Task, TaskOptions},
 };
-use ostd::{arch::cpu::context::CpuException, warn};
+use ostd::arch::cpu::context::CpuException;
 pub use self::vmar::{Vmar, VmarQuery, VMAR_CAP_ADDR, VMAR_LOWEST_ADDR};
 use crate::errno::{Errno, Result};
 use self::vmar::page_fault::PageFaultInfo;
@@ -103,11 +103,7 @@ fn resolve_kernel_page_fault(exception: &CpuException) -> Result<(), ()> {
     };
     match current_vmar().and_then(|vmar| vmar.handle_page_fault(&info.provoked())) {
         Ok(()) => Ok(()),
-        Err(errno) => {
-            warn!(
-                "cannot resolve a kernel-mode fault at {:#x}: {errno}",
-                info.address()
-            );
+        Err(_) => {
             Err(())
         }
     }

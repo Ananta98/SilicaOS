@@ -378,9 +378,14 @@ impl RunQueue {
             self.min_vruntime = vruntime;
             entry.entity.set_vruntime(vruntime);
         } else {
-            entry
-                .entity
-                .set_vruntime(vruntime.max(self.min_vruntime));
+            if vruntime < self.min_vruntime {
+                let diff = self.min_vruntime - vruntime;
+                self.min_vruntime = vruntime;
+                self.sum_offset_weighted = self
+                    .sum_offset_weighted
+                    .saturating_add(diff.saturating_mul(self.sum_weight));
+            }
+            entry.entity.set_vruntime(vruntime);
         }
         entry.entity.set_placed();
         self.insert(entry, false);

@@ -3,6 +3,9 @@ name = "silica"
 version = "0.1.0"
 edition = "2024"
 
+[dependencies]
+xmas-elf = { version = "0.10.0", default-features = false }
+
 [dependencies.ostd]
 version = "0.18.1"
 

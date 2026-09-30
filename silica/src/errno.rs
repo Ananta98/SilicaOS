@@ -27,8 +27,12 @@ pub enum Errno {
     EINTR = 4,
     /// Input/output error.
     EIO = 5,
+    /// Exec format error.
+    ENOEXEC = 8,
     /// Bad file descriptor.
     EBADF = 9,
+    /// No child processes.
+    ECHILD = 10,
     /// Resource temporarily unavailable.
     EAGAIN = 11,
     /// Cannot allocate memory.
@@ -73,6 +77,11 @@ impl Errno {
         self as i32
     }
 
+    /// Returns the raw POSIX error value for user space.
+    pub const fn to_posix_raw(self) -> i32 {
+        self as i32
+    }
+
     /// Returns the name of the error, as it is spelled in the C headers.
     ///
     /// The derived [`Debug`] already prints this, but a log line that wants the
@@ -84,7 +93,9 @@ impl Errno {
             Self::ESRCH => "ESRCH",
             Self::EINTR => "EINTR",
             Self::EIO => "EIO",
+            Self::ENOEXEC => "ENOEXEC",
             Self::EBADF => "EBADF",
+            Self::ECHILD => "ECHILD",
             Self::EAGAIN => "EAGAIN",
             Self::ENOMEM => "ENOMEM",
             Self::EACCES => "EACCES",
@@ -114,7 +125,9 @@ impl Errno {
             Self::ESRCH => "no such process",
             Self::EINTR => "interrupted system call",
             Self::EIO => "input/output error",
+            Self::ENOEXEC => "exec format error",
             Self::EBADF => "bad file descriptor",
+            Self::ECHILD => "no child processes",
             Self::EAGAIN => "resource temporarily unavailable",
             Self::ENOMEM => "cannot allocate memory",
             Self::EACCES => "permission denied",

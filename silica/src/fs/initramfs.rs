@@ -28,3 +28,17 @@ pub fn initramfs_init() {
         ostd::warn!("No initramfs provided by bootloader");
     }
 }
+
+/// Reads file data from initramfs by path.
+pub fn read_file_from_initramfs(path: &str) -> Option<&'static [u8]> {
+    let clean = path.trim_start_matches('/');
+    let initramfs_buf = ostd::boot::boot_info().initramfs?;
+    let archive = CpioArchive::new(initramfs_buf);
+    for entry in archive.flatten() {
+        let name = entry.name.trim_start_matches('.').trim_start_matches('/');
+        if name == clean {
+            return Some(entry.data);
+        }
+    }
+    None
+}

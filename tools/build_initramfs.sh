@@ -17,9 +17,16 @@ mkdir -p "$BUILD_DIR"/{bin,boot,dev,etc/defaults,lib,libexec,media,mnt,proc,resc
 chmod 1777 "$BUILD_DIR"/tmp "$BUILD_DIR"/var/tmp
 chmod 0700 "$BUILD_DIR"/root
 
-# Provide a dummy init if you need a placeholder
-# echo -e '#!/bin/sh\nexec /bin/sh' > "$BUILD_DIR/sbin/init"
-# chmod +x "$BUILD_DIR/sbin/init"
+# Build the init binary if tools/init.s exists
+if [ -f "tools/init.s" ]; then
+    echo "Assembling tools/init.s..."
+    as tools/init.s -o /tmp/init.o
+    ld -nostdlib -no-pie /tmp/init.o -o "$BUILD_DIR/init"
+    rm -f /tmp/init.o
+    chmod 0755 "$BUILD_DIR/init"
+    cp "$BUILD_DIR/init" "$BUILD_DIR/sbin/init"
+    echo "Installed /init and /sbin/init in initramfs"
+fi
 
 # Build the CPIO archive (newc format)
 mkdir -p $(dirname "$OUTPUT")

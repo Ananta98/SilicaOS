@@ -240,7 +240,7 @@ impl Thread {
 
             match return_reason {
                 ReturnReason::UserSyscall => {
-                    super::syscalls::dispatch(user_mode.context_mut());
+                    crate::syscall::dispatch(user_mode.context_mut());
                     if self.inner.lock().state == ThreadState::Dead {
                         return;
                     }

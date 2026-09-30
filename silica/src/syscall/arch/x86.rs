@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 
-//! System call dispatch for x86_64 architecture.
+//! System call dispatch for x86_64 architecture matching Linux syscall ABI numbers.
 
-use crate::syscall::{fs, proc, mm, sched};
+use crate::syscall::{fs, mm, proc, sched};
 
 crate::impl_syscall_nums_and_dispatch_fn! {
     SYS_READ = 0 => fs::sys_read(i32, usize, usize);

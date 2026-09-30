@@ -15,7 +15,7 @@ macro_rules! invoke_syscall_handler {
 macro_rules! impl_syscall_nums_and_dispatch_fn {
     (
         $(
-            $name:ident = $num:expr => $handler:path ( $($arg_ty:ty),* ) ;
+            $name:ident = $num:expr => $(::)? $($handler:ident)::+ ( $($arg_ty:ty),* ) ;
         )*
     ) => {
         $(
@@ -30,7 +30,7 @@ macro_rules! impl_syscall_nums_and_dispatch_fn {
 
             let res = match sys_no {
                 $(
-                    $num => crate::invoke_syscall_handler!($handler, args, ctx $(, $arg_ty)*),
+                    $num => crate::invoke_syscall_handler!($($handler)::+, args, ctx $(, $arg_ty)*),
                 )*
                 _ => {
                     ostd::warn!("Unsupported syscall number: {sys_no}");

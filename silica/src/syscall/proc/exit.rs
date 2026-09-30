@@ -2,7 +2,7 @@
 
 use ostd::arch::cpu::context::UserContext;
 use crate::{
-    errno::{Errno, Result},
+    errno::Result,
     proc::{ExitStatus, exit::exit1, thread::Thread},
 };
 

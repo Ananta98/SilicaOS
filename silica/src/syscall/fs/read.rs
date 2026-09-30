@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
-use ostd::arch::cpu::context::UserContext;
+use ostd::{arch::cpu::context::UserContext, mm::FallibleVmWrite};
 use crate::{
     errno::{Errno, Result},
     proc::thread::Thread,

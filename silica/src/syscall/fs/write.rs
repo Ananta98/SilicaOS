@@ -5,7 +5,7 @@ use crate::{
     errno::{Errno, Result},
     proc::thread::Thread,
 };
-use ostd::mm::io::{FallibleVmRead, FallibleVmWrite};
+use ostd::mm::io::FallibleVmRead;
 
 pub fn sys_write(fd: i32, buf_ptr: usize, count: usize, _ctx: &mut UserContext) -> Result<usize> {
     if count == 0 {

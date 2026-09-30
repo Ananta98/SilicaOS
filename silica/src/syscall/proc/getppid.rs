@@ -6,7 +6,7 @@ use crate::{
     proc::thread::Thread,
 };
 
-pub fn sys_getppid(_args: &[usize; 6], _ctx: &mut UserContext) -> Result<usize> {
+pub fn sys_getppid(_ctx: &mut UserContext) -> Result<usize> {
     let proc = Thread::current_proc().ok_or(Errno::ESRCH)?;
     let ppid = proc.inner.lock().ppid.map(|p| p.as_u32()).unwrap_or(0);
     Ok(ppid as usize)

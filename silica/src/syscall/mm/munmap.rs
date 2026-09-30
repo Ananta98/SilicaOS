@@ -6,10 +6,7 @@ use crate::{
     proc::thread::Thread,
 };
 
-pub fn sys_munmap(args: &[usize; 6], _ctx: &mut UserContext) -> Result<usize> {
-    let addr = args[0];
-    let len = args[1];
-
+pub fn sys_munmap(addr: usize, len: usize, _ctx: &mut UserContext) -> Result<usize> {
     let proc = Thread::current_proc().ok_or(Errno::ESRCH)?;
     proc.vmspace().munmap(addr..addr + len)?;
     Ok(0)

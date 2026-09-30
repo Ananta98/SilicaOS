@@ -7,12 +7,7 @@ use crate::{
 };
 
 /// sys_wait4(pid, status, options, rusage)
-pub fn sys_wait4(args: &[usize; 6], _ctx: &mut UserContext) -> Result<usize> {
-    let pid_val = args[0] as i32;
-    let status_ptr = args[1];
-    let options_val = args[2] as u32;
-    let _rusage_ptr = args[3];
-
+pub fn sys_wait4(pid_val: i32, status_ptr: usize, options_val: u32, _rusage_ptr: usize, _ctx: &mut UserContext) -> Result<usize> {
     let proc = Thread::current_proc().ok_or(Errno::ESRCH)?;
     
     let idtype = if pid_val < -1 {

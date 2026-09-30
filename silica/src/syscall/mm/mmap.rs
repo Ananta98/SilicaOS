@@ -7,14 +7,15 @@ use crate::{
     vm::{flags::MmapFlags, perms::VmPerms},
 };
 
-pub fn sys_mmap(args: &[usize; 6], _ctx: &mut UserContext) -> Result<usize> {
-    let addr = args[0];
-    let len = args[1];
-    let prot_val = args[2] as u32;
-    let flags_val = args[3] as u32;
-    let _fd = args[4] as i32;
-    let _offset = args[5];
-
+pub fn sys_mmap(
+    addr: usize,
+    len: usize,
+    prot_val: u32,
+    flags_val: u32,
+    _fd: i32,
+    _offset: usize,
+    _ctx: &mut UserContext
+) -> Result<usize> {
     let proc = Thread::current_proc().ok_or(Errno::ESRCH)?;
     let vmar = proc.vmspace();
 
@@ -24,11 +25,6 @@ pub fn sys_mmap(args: &[usize; 6], _ctx: &mut UserContext) -> Result<usize> {
     if (prot_val & 4) != 0 { perms |= VmPerms::EXEC; }
 
     let mut flags = MmapFlags::empty();
-    // Simplified mapping based on expected Linux constants for mmap
-    // Linux MAP_SHARED = 0x01
-    // Linux MAP_PRIVATE = 0x02
-    // Linux MAP_FIXED = 0x10
-    // Linux MAP_ANONYMOUS = 0x20
     if (flags_val & 0x02) != 0 { flags |= MmapFlags::PRIVATE; }
     if (flags_val & 0x01) != 0 { flags |= MmapFlags::SHARED; }
     if (flags_val & 0x10) != 0 { flags |= MmapFlags::FIXED; }

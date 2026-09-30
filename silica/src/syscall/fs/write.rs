@@ -7,11 +7,7 @@ use crate::{
 };
 use ostd::mm::io::{FallibleVmRead, FallibleVmWrite};
 
-pub fn sys_write(args: &[usize; 6], _ctx: &mut UserContext) -> Result<usize> {
-    let fd = args[0] as i32;
-    let buf_ptr = args[1];
-    let count = args[2];
-
+pub fn sys_write(fd: i32, buf_ptr: usize, count: usize, _ctx: &mut UserContext) -> Result<usize> {
     if count == 0 {
         return Ok(0);
     }

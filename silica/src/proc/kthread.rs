@@ -13,7 +13,6 @@ use crate::{
     proc::{
         Proc,
         cred::Ucred,
-        fd::Filedesc,
         limit::Plimit,
         signal::SigActs,
         thread::{Thread, ThreadFlags, ThreadInner, ThreadState, alloc_tid},
@@ -22,6 +21,7 @@ use crate::{
     sched,
     vm::vmar::Vmar,
 };
+use crate::fs::fd::Filedesc;
 
 /// Spawns a dedicated kernel process (e.g. `pagedaemon`, `bufdaemon`).
 pub fn kproc_create(

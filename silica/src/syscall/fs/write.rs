@@ -21,13 +21,6 @@ pub fn sys_write(fd: i32, buf_ptr: usize, count: usize, _ctx: &mut UserContext) 
     let mut writer = ostd::mm::VmWriter::from(&mut kbuf[..]);
     reader.read_fallible(&mut writer).map_err(|_| Errno::EFAULT)?;
 
-    if fd == 1 || fd == 2 {
-        if let Ok(s) = core::str::from_utf8(&kbuf[..copy_len]) {
-            ostd::info!("[USER]: {}", s.trim_end_matches('\n'));
-        }
-        return Ok(copy_len);
-    }
-
     let file = proc.fd_table.lock().get(fd)?;
     file.write(&kbuf[..copy_len])
 }

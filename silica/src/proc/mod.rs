@@ -7,7 +7,6 @@
 
 pub mod cred;
 pub mod limit;
-pub mod fd;
 pub mod signal;
 pub mod tree;
 pub mod thread;
@@ -28,12 +27,12 @@ use crate::{
 };
 use self::{
     cred::Ucred,
-    fd::Filedesc,
     limit::Plimit,
     signal::{SigActs, SigQueue, Signal},
     thread::{Thread, Tid},
     tree::Pid,
 };
+use crate::fs::fd::Filedesc;
 
 /// Process lifecycle state machine mirroring FreeBSD `p_state` / `PRS_*`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

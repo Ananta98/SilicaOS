@@ -9,6 +9,8 @@ use alloc::{sync::Arc, vec::Vec};
 use bitflags::bitflags;
 
 use crate::errno::Result;
+use crate::fs::devfs::{ConsoleFile, NullFile};
+use crate::fs::vfs::File;
 
 bitflags! {
     /// File descriptor flags.
@@ -19,34 +21,10 @@ bitflags! {
     }
 }
 
-/// Generic abstract file representation for descriptors.
-pub trait File: Send + Sync {
-    /// Reads bytes from the file into `buf`.
-    fn read(&self, buf: &mut [u8]) -> Result<usize>;
-    /// Writes bytes from `buf` to the file.
-    fn write(&self, buf: &[u8]) -> Result<usize>;
-    /// Releases the file handle.
-    fn close(&self) -> Result<()> {
-        Ok(())
-    }
-}
-
-/// Dummy null file for testing / standard streams placeholder.
-pub struct NullFile;
-
-impl File for NullFile {
-    fn read(&self, _buf: &mut [u8]) -> Result<usize> {
-        Ok(0)
-    }
-    fn write(&self, buf: &[u8]) -> Result<usize> {
-        Ok(buf.len())
-    }
-}
-
 /// An entry in the file descriptor table.
 #[derive(Clone)]
 pub struct FdEntry {
-    pub file: Arc<dyn File>,
+    pub file: Arc<File>,
     pub flags: FdFlags,
 }
 
@@ -70,23 +48,25 @@ impl Filedesc {
         }
     }
 
-    /// Creates a table with stdin, stdout, stderr (FDs 0, 1, 2) initialized to `NullFile`.
+    /// Creates a table with stdin (0) as NullFile, stdout (1) and stderr (2) as ConsoleFile.
     pub fn with_stdio() -> Self {
         let mut table = Self::new();
-        let null = Arc::new(NullFile);
-        let _ = table.alloc_fd(null.clone(), FdFlags::empty());
-        let _ = table.alloc_fd(null.clone(), FdFlags::empty());
+        let null = NullFile::new_file();
+        let console1 = ConsoleFile::new_file();
+        let console2 = ConsoleFile::new_file();
         let _ = table.alloc_fd(null, FdFlags::empty());
+        let _ = table.alloc_fd(console1, FdFlags::empty());
+        let _ = table.alloc_fd(console2, FdFlags::empty());
         table
     }
 
     /// Allocates the lowest available file descriptor for `file`.
-    pub fn alloc_fd(&mut self, file: Arc<dyn File>, flags: FdFlags) -> Result<i32> {
+    pub fn alloc_fd(&mut self, file: Arc<File>, flags: FdFlags) -> Result<i32> {
         self.alloc_fd_at(0, file, flags)
     }
 
     /// Allocates the lowest available file descriptor greater than or equal to `min_fd`.
-    pub fn alloc_fd_at(&mut self, min_fd: i32, file: Arc<dyn File>, flags: FdFlags) -> Result<i32> {
+    pub fn alloc_fd_at(&mut self, min_fd: i32, file: Arc<File>, flags: FdFlags) -> Result<i32> {
         if min_fd < 0 || min_fd as usize >= self.max_files {
             crate::return_errno!(EINVAL, "invalid minimum file descriptor {min_fd}");
         }
@@ -109,7 +89,7 @@ impl Filedesc {
     }
 
     /// Retrieves the file referenced by `fd`.
-    pub fn get(&self, fd: i32) -> Result<Arc<dyn File>> {
+    pub fn get(&self, fd: i32) -> Result<Arc<File>> {
         if fd < 0 {
             crate::return_errno!(EBADF, "negative file descriptor {fd}");
         }
@@ -169,7 +149,6 @@ impl Filedesc {
             crate::return_errno!(EBADF, "invalid file descriptor for dup2");
         }
         if oldfd == newfd {
-            // If oldfd is valid, return newfd without changes
             let _ = self.get(oldfd)?;
             return Ok(newfd);
         }

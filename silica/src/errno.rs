@@ -47,6 +47,10 @@ pub enum Errno {
     EEXIST = 17,
     /// No such device.
     ENODEV = 19,
+    /// Not a directory.
+    ENOTDIR = 20,
+    /// Is a directory.
+    EISDIR = 21,
     /// Invalid argument.
     EINVAL = 22,
     /// Too many open files in system.
@@ -55,6 +59,8 @@ pub enum Errno {
     EMFILE = 24,
     /// No space left on device.
     ENOSPC = 28,
+    /// Illegal seek.
+    ESPIPE = 29,
     /// Read-only file system.
     EROFS = 30,
     /// Numerical result out of range.
@@ -103,10 +109,13 @@ impl Errno {
             Self::EBUSY => "EBUSY",
             Self::EEXIST => "EEXIST",
             Self::ENODEV => "ENODEV",
+            Self::ENOTDIR => "ENOTDIR",
+            Self::EISDIR => "EISDIR",
             Self::EINVAL => "EINVAL",
             Self::ENFILE => "ENFILE",
             Self::EMFILE => "EMFILE",
             Self::ENOSPC => "ENOSPC",
+            Self::ESPIPE => "ESPIPE",
             Self::EROFS => "EROFS",
             Self::ERANGE => "ERANGE",
             Self::ENAMETOOLONG => "ENAMETOOLONG",
@@ -135,10 +144,13 @@ impl Errno {
             Self::EBUSY => "device or resource busy",
             Self::EEXIST => "file exists",
             Self::ENODEV => "no such device",
+            Self::ENOTDIR => "not a directory",
+            Self::EISDIR => "is a directory",
             Self::EINVAL => "invalid argument",
             Self::ENFILE => "too many open files in system",
             Self::EMFILE => "too many open files",
             Self::ENOSPC => "no space left on device",
+            Self::ESPIPE => "illegal seek",
             Self::EROFS => "read-only file system",
             Self::ERANGE => "numerical result out of range",
             Self::ENAMETOOLONG => "file name too long",

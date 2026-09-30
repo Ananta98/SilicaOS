@@ -37,6 +37,8 @@ pub mod utils;
 pub mod cmdline;
 pub mod proc;
 pub mod syscall;
+pub mod modules;
+pub mod drivers;
 
 #[ostd::main]
 fn kernel_main() {
@@ -44,6 +46,34 @@ fn kernel_main() {
     vm::init();
     fs::init();
     sched::init();
+
+    if let Err(err) = drivers::init() {
+        ostd::error!("Drivers init failed: {:?}", err);
+    }
+
+    // 1. Register compiled-in kernel modules
+    modules::register_module(alloc::sync::Arc::new(fs::ext2::Ext2Module));
+    modules::register_module(alloc::sync::Arc::new(fs::exfat::ExFatModule));
+    modules::register_module(alloc::sync::Arc::new(drivers::block::nvme::NvmeModule));
+
+    // 2. Schedule module initialization via staged initcalls
+    modules::register_initcall(modules::InitcallLevel::Fs, "ext2", || {
+        modules::init_compiled_module("ext2")
+    });
+    modules::register_initcall(modules::InitcallLevel::Fs, "exfat", || {
+        modules::init_compiled_module("exfat")
+    });
+    modules::register_initcall(modules::InitcallLevel::Device, "nvme", || {
+        modules::init_compiled_module("nvme")
+    });
+
+    // 3. Run staged initcalls (subsystems, filesystems, device drivers)
+    if let Err(err) = modules::do_initcalls() {
+        ostd::error!("Initcall execution failed: {:?}", err);
+    }
+
+    // 4. Auto-probe discovered block devices with registered filesystem drivers
+    fs::auto_probe_and_mount();
 
     // Check for userspace init binary in initramfs
     let init_path = cmdline::get_init_path();

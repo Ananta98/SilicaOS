@@ -15,17 +15,16 @@ use alloc::sync::Arc;
 pub use block_group::BlockGroupDescriptor;
 pub use dir::Ext2DirEntry;
 pub use fs::Ext2Fs;
-pub use inode::{Ext2RawInode, EXT2_ROOT_INO};
-pub use superblock::{SuperBlock, EXT2_SUPER_MAGIC};
+pub use inode::{EXT2_ROOT_INO, Ext2RawInode};
+pub use superblock::{EXT2_SUPER_MAGIC, SuperBlock};
 
 use crate::{
     drivers::block::BlockDevice,
     errno::Result,
     fs::{
-        registry::{register_filesystem_type, FileSystemType},
+        registry::{FileSystemType, register_filesystem_type},
         vfs::FileSystem,
     },
-    modules::KernelModule,
 };
 
 /// Filesystem type descriptor for Ext2.
@@ -42,33 +41,14 @@ impl FileSystemType for Ext2FsType {
     }
 }
 
-/// Ext2 Filesystem Kernel Module.
-pub struct Ext2Module;
-
-impl KernelModule for Ext2Module {
-    fn name(&self) -> &'static str {
-        "ext2"
-    }
-
-    fn version(&self) -> &'static str {
-        "1.0.0"
-    }
-
-    fn description(&self) -> &'static str {
-        "Second Extended (Ext2) Filesystem Driver"
-    }
-
-    fn author(&self) -> &'static str {
-        "SilicaOS Team"
-    }
-
-    fn init(&self) -> Result<()> {
-        register_filesystem_type(Arc::new(Ext2FsType));
-        Ok(())
-    }
-
-    fn exit(&self) -> Result<()> {
-        ostd::info!("Ext2: Driver unloaded");
-        Ok(())
-    }
+fn init() -> Result<()> {
+    register_filesystem_type(Arc::new(Ext2FsType));
+    Ok(())
 }
+
+crate::module!(
+    "Ext2 Filesystem Driver",
+    "Ananta98",
+    crate::modules::InitcallLevel::Fs,
+    init
+);

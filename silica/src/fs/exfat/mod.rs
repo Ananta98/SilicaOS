@@ -11,7 +11,7 @@ pub mod fs;
 
 use alloc::sync::Arc;
 
-pub use boot_sector::{ExFatBootSector, EXFAT_FS_NAME};
+pub use boot_sector::{EXFAT_FS_NAME, ExFatBootSector};
 pub use cluster::ClusterManager;
 pub use entry::ExFatFileEntry;
 pub use fs::ExFatFs;
@@ -20,10 +20,9 @@ use crate::{
     drivers::block::BlockDevice,
     errno::Result,
     fs::{
-        registry::{register_filesystem_type, FileSystemType},
+        registry::{FileSystemType, register_filesystem_type},
         vfs::FileSystem,
     },
-    modules::KernelModule,
 };
 
 /// Filesystem type descriptor for ExFAT.
@@ -40,33 +39,14 @@ impl FileSystemType for ExFatFsType {
     }
 }
 
-/// ExFAT Filesystem Kernel Module.
-pub struct ExFatModule;
-
-impl KernelModule for ExFatModule {
-    fn name(&self) -> &'static str {
-        "exfat"
-    }
-
-    fn version(&self) -> &'static str {
-        "1.0.0"
-    }
-
-    fn description(&self) -> &'static str {
-        "Extended File Allocation Table (ExFAT) Filesystem Driver"
-    }
-
-    fn author(&self) -> &'static str {
-        "SilicaOS Team"
-    }
-
-    fn init(&self) -> Result<()> {
-        register_filesystem_type(Arc::new(ExFatFsType));
-        Ok(())
-    }
-
-    fn exit(&self) -> Result<()> {
-        ostd::info!("ExFAT: Driver unloaded");
-        Ok(())
-    }
+fn init() -> Result<()> {
+    register_filesystem_type(Arc::new(ExFatFsType));
+    Ok(())
 }
+
+crate::module!(
+    "ExFAT Filesystem Driver",
+    "Ananta98",
+    crate::modules::InitcallLevel::Fs,
+    init
+);

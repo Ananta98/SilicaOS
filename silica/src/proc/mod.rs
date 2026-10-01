@@ -18,6 +18,8 @@ pub mod exec;
 pub mod stack;
 pub mod init;
 
+pub use init::spawn_init_process;
+
 use alloc::{string::String, sync::Arc, vec::Vec};
 use ostd::sync::SpinLock;
 
@@ -264,7 +266,7 @@ pub fn create_init_process() -> Result<Arc<Proc>> {
 pub fn create_init_process_with_vmar(vmar: Arc<Vmar>) -> Result<Arc<Proc>> {
     let pid = tree::PID_INIT;
     let _ = tree::PID_ALLOCATOR.lock().reserve(pid);
-    let fd_table = Arc::new(SpinLock::new(Filedesc::new()));
+    let fd_table = Arc::new(SpinLock::new(Filedesc::with_stdio()));
     let cred = Arc::new(Ucred::root());
     let limit = Arc::new(Plimit::default_limits());
     let sigacts = Arc::new(SpinLock::new(SigActs::new()));

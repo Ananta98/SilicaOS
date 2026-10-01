@@ -11,20 +11,12 @@ pub mod namespace;
 pub mod queue;
 pub mod regs;
 
-use alloc::{
-    format,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{format, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use ostd::{
     io::IoMem,
-    mm::{
-        HasPaddr, VmIoOnce, VmWriter,
-        dma::DmaCoherent,
-        io::util::HasVmReaderWriter,
-    },
+    mm::{HasPaddr, VmIoOnce, VmWriter, dma::DmaCoherent, io::util::HasVmReaderWriter},
 };
 
 use self::{
@@ -39,7 +31,6 @@ use crate::{
         bus::pci::{self, PciDevice},
     },
     errno::{Errno, Result},
-    modules::KernelModule,
 };
 
 /// High-level NVMe Controller handle.
@@ -79,7 +70,8 @@ pub fn probe_controller(dev: &PciDevice) -> Result<Arc<NvmeController>> {
     // 4. Reset Controller: Clear CC.EN, wait for CSTS.RDY == 0
     let cc_val: u32 = mmio.read_once(NVME_REG_CC).map_err(|_| Errno::EIO)?;
     if (cc_val & NVME_CC_EN) != 0 {
-        mmio.write_once(NVME_REG_CC, &(cc_val & !NVME_CC_EN)).map_err(|_| Errno::EIO)?;
+        mmio.write_once(NVME_REG_CC, &(cc_val & !NVME_CC_EN))
+            .map_err(|_| Errno::EIO)?;
     }
 
     let mut timeout = 1_000_000;
@@ -93,24 +85,35 @@ pub fn probe_controller(dev: &PciDevice) -> Result<Arc<NvmeController>> {
     }
 
     // 5. Initialize Admin Queue Pair (QID 0)
-    let admin_queue = Arc::new(Mutex::new(NvmeQueuePair::new(0, DEFAULT_QUEUE_SIZE, doorbell_stride)?));
+    let admin_queue = Arc::new(Mutex::new(NvmeQueuePair::new(
+        0,
+        DEFAULT_QUEUE_SIZE,
+        doorbell_stride,
+    )?));
 
     // 6. Write Admin Queue Configuration to Controller
     let aqa = ((DEFAULT_QUEUE_SIZE - 1) as u32) | (((DEFAULT_QUEUE_SIZE - 1) as u32) << 16);
-    mmio.write_once(NVME_REG_AQA, &aqa).map_err(|_| Errno::EIO)?;
+    mmio.write_once(NVME_REG_AQA, &aqa)
+        .map_err(|_| Errno::EIO)?;
 
     let (asq_pa, acq_pa) = {
         let q = admin_queue.lock();
         (q.sq_paddr, q.cq_paddr)
     };
-    mmio.write_once(NVME_REG_ASQ, &(asq_pa as u32)).map_err(|_| Errno::EIO)?;
-    mmio.write_once(NVME_REG_ASQ + 4, &((asq_pa >> 32) as u32)).map_err(|_| Errno::EIO)?;
-    mmio.write_once(NVME_REG_ACQ, &(acq_pa as u32)).map_err(|_| Errno::EIO)?;
-    mmio.write_once(NVME_REG_ACQ + 4, &((acq_pa >> 32) as u32)).map_err(|_| Errno::EIO)?;
+    mmio.write_once(NVME_REG_ASQ, &(asq_pa as u32))
+        .map_err(|_| Errno::EIO)?;
+    mmio.write_once(NVME_REG_ASQ + 4, &((asq_pa >> 32) as u32))
+        .map_err(|_| Errno::EIO)?;
+    mmio.write_once(NVME_REG_ACQ, &(acq_pa as u32))
+        .map_err(|_| Errno::EIO)?;
+    mmio.write_once(NVME_REG_ACQ + 4, &((acq_pa >> 32) as u32))
+        .map_err(|_| Errno::EIO)?;
 
     // 7. Enable Controller: Set CC.EN with standard 4K page size, 64B SQE, 16B CQE
-    let new_cc = NVME_CC_EN | NVME_CC_CSS_NVM | NVME_CC_MPS_4K | NVME_CC_IOSQES_64 | NVME_CC_IOCQES_16;
-    mmio.write_once(NVME_REG_CC, &new_cc).map_err(|_| Errno::EIO)?;
+    let new_cc =
+        NVME_CC_EN | NVME_CC_CSS_NVM | NVME_CC_MPS_4K | NVME_CC_IOSQES_64 | NVME_CC_IOCQES_16;
+    mmio.write_once(NVME_REG_CC, &new_cc)
+        .map_err(|_| Errno::EIO)?;
 
     // Wait for CSTS.RDY == 1
     timeout = 1_000_000;
@@ -133,13 +136,24 @@ pub fn probe_controller(dev: &PciDevice) -> Result<Arc<NvmeController>> {
     let mut id_writer = VmWriter::from(&mut id_buf[..]);
     let _ = reader.read(&mut id_writer);
 
-    let model = core::str::from_utf8(&id_buf[24..64]).unwrap_or("NVMe SSD").trim();
-    let num_namespaces = u32::from_le_bytes(id_buf[516..520].try_into().unwrap_or([1, 0, 0, 0])).max(1);
+    let model = core::str::from_utf8(&id_buf[24..64])
+        .unwrap_or("NVMe SSD")
+        .trim();
+    let num_namespaces =
+        u32::from_le_bytes(id_buf[516..520].try_into().unwrap_or([1, 0, 0, 0])).max(1);
 
-    ostd::info!("NVMe: Discovered controller \"{}\" with {} namespace(s)", model, num_namespaces);
+    ostd::info!(
+        "NVMe: Discovered controller \"{}\" with {} namespace(s)",
+        model,
+        num_namespaces
+    );
 
     // 9. Create I/O Queue Pair (QID 1)
-    let io_queue = Arc::new(Mutex::new(NvmeQueuePair::new(1, DEFAULT_QUEUE_SIZE, doorbell_stride)?));
+    let io_queue = Arc::new(Mutex::new(NvmeQueuePair::new(
+        1,
+        DEFAULT_QUEUE_SIZE,
+        doorbell_stride,
+    )?));
     let (io_sq_pa, io_cq_pa) = {
         let q = io_queue.lock();
         (q.sq_paddr, q.cq_paddr)
@@ -196,41 +210,17 @@ pub fn probe_controller(dev: &PciDevice) -> Result<Arc<NvmeController>> {
 }
 
 // ----------------------------------------------------------------------------
-// KernelModule Implementation
+// Kernel Module Declaration via module! macro
 // ----------------------------------------------------------------------------
 
-/// NVMe Driver Kernel Module.
-pub struct NvmeModule;
-
-impl KernelModule for NvmeModule {
-    fn name(&self) -> &'static str {
-        "nvme"
-    }
-
-    fn version(&self) -> &'static str {
-        "1.0.0"
-    }
-
-    fn description(&self) -> &'static str {
-        "NVM Express (NVMe) PCIe Storage Driver"
-    }
-
-    fn author(&self) -> &'static str {
-        "SilicaOS Team"
-    }
-
-    fn init(&self) -> Result<()> {
-        if let Some(dev) = pci::find_nvme_device() {
-            probe_controller(&dev)?;
-            Ok(())
-        } else {
-            ostd::info!("NVMe: No NVMe controller found on PCI bus");
-            Ok(())
-        }
-    }
-
-    fn exit(&self) -> Result<()> {
-        ostd::info!("NVMe: Driver unloaded");
+fn init() -> Result<()> {
+    if let Some(dev) = pci::find_nvme_device() {
+        probe_controller(&dev)?;
+        Ok(())
+    } else {
+        ostd::info!("NVMe: No NVMe controller found on PCI bus");
         Ok(())
     }
 }
+
+crate::module!("NVMe PCIe Storage Driver", "Ananta98", init);

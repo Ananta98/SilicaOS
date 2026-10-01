@@ -18,8 +18,6 @@
 
 extern crate alloc;
 
-use ostd::user::UserContextApi;
-
 macro_rules! __log_prefix {
     () => {
         ""
@@ -29,16 +27,16 @@ macro_rules! __log_prefix {
 #[cfg_attr(target_arch = "x86_64", path = "arch/x86_64/mod.rs")]
 pub mod arch;
 
-pub mod vm;
-pub mod fs;
-pub mod errno;
-pub mod sched;
-pub mod utils;
 pub mod cmdline;
-pub mod proc;
-pub mod syscall;
-pub mod modules;
 pub mod drivers;
+pub mod errno;
+pub mod fs;
+pub mod modules;
+pub mod proc;
+pub mod sched;
+pub mod syscall;
+pub mod utils;
+pub mod vm;
 
 #[ostd::main]
 fn kernel_main() {
@@ -51,55 +49,13 @@ fn kernel_main() {
         ostd::error!("Drivers init failed: {:?}", err);
     }
 
-    // 1. Register compiled-in kernel modules
-    modules::register_module(alloc::sync::Arc::new(fs::ext2::Ext2Module));
-    modules::register_module(alloc::sync::Arc::new(fs::exfat::ExFatModule));
-    modules::register_module(alloc::sync::Arc::new(drivers::block::nvme::NvmeModule));
-
-    // 2. Schedule module initialization via staged initcalls
-    modules::register_initcall(modules::InitcallLevel::Fs, "ext2", || {
-        modules::init_compiled_module("ext2")
-    });
-    modules::register_initcall(modules::InitcallLevel::Fs, "exfat", || {
-        modules::init_compiled_module("exfat")
-    });
-    modules::register_initcall(modules::InitcallLevel::Device, "nvme", || {
-        modules::init_compiled_module("nvme")
-    });
-
-    // 3. Run staged initcalls (subsystems, filesystems, device drivers)
-    if let Err(err) = modules::do_initcalls() {
-        ostd::error!("Initcall execution failed: {:?}", err);
+    // Initialize all kernel module drivers declared via `module!` macros
+    if let Err(err) = modules::init_calls() {
+        ostd::error!("Module initcalls failed: {:?}", err);
     }
 
-    // 4. Auto-probe discovered block devices with registered filesystem drivers
-    fs::auto_probe_and_mount();
-
-    // Check for userspace init binary in initramfs
-    let init_path = cmdline::get_init_path();
-    let elf_data = fs::read_file_from_initramfs(&init_path)
-        .or_else(|| fs::read_file_from_initramfs("/init"))
-        .or_else(|| fs::read_file_from_initramfs("init"));
-
-    if let Some(elf_data) = elf_data {
-        ostd::info!("Booting userspace init from initramfs ({} bytes)", elf_data.len());
-        match proc::exec::load_and_setup(elf_data, &[&init_path], &[]) {
-            Ok((vmar, entry_point, sp)) => {
-                let proc = proc::create_init_process_with_vmar(vmar)
-                    .expect("failed to create init process");
-                let mut user_ctx = ostd::arch::cpu::context::UserContext::default();
-                user_ctx.set_instruction_pointer(entry_point);
-                user_ctx.set_stack_pointer(sp);
-                let thread = proc::create_main_thread(&proc, user_ctx)
-                    .expect("failed to create init thread");
-                thread.run();
-                ostd::info!("Init process (PID 1) scheduled successfully at entry {:#x}", entry_point);
-            }
-            Err(err) => {
-                ostd::error!("Failed to load userspace init ELF: {:?}", err);
-            }
-        }
-    } else {
-        ostd::warn!("No userspace init binary found in initramfs");
+    // Spawn initial userspace process (PID 1)
+    if let Err(err) = proc::init::spawn_init_process() {
+        ostd::warn!("Init process could not be launched: {:?}", err);
     }
 }

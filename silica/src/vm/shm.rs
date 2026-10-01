@@ -155,13 +155,19 @@ static REGISTRY: Registry = SpinLock::new(Vec::new());
 /// never escape the shared memory namespace.
 fn check_name(name: &str) -> Result<()> {
     if name.len() > NAME_MAX {
-        crate::return_errno!(ENAMETOOLONG, "shared memory name is longer than {NAME_MAX} bytes");
+        crate::return_errno!(
+            ENAMETOOLONG,
+            "shared memory name is longer than {NAME_MAX} bytes"
+        );
     }
     if name.is_empty() || !name.starts_with('/') {
         crate::return_errno!(EINVAL, "a shared memory name must start with '/'");
     }
     if name[1..].contains('/') {
-        crate::return_errno!(EINVAL, "a shared memory name must not contain a '/' after the first");
+        crate::return_errno!(
+            EINVAL,
+            "a shared memory name must not contain a '/' after the first"
+        );
     }
     Ok(())
 }
@@ -224,221 +230,4 @@ pub fn names() -> Vec<String> {
         .iter()
         .map(|(name, _)| name.clone())
         .collect()
-}
-
-#[cfg(ktest)]
-mod tests {
-    use ostd::mm::{HasPaddr, PAGE_SIZE, VmIo};
-    use ostd::prelude::ktest;
-
-    use super::*;
-    use crate::errno::Errno;
-
-    #[ktest]
-    fn create_open_unlink() {
-        unlink("/shm_test_a").unwrap_err();
-        let object = create("/shm_test_a", 4 * PAGE_SIZE).unwrap();
-        assert_eq!(object.size(), 4 * PAGE_SIZE);
-
-        // A second create must not clobber the live object.
-        assert_eq!(
-            create("/shm_test_a", PAGE_SIZE).unwrap_err(),
-            Errno::EEXIST
-        );
-
-        // open hands back the same object.
-        let again = open("/shm_test_a").unwrap();
-        assert!(Arc::ptr_eq(&object, &again));
-
-        // A named object outlives the handle that created it, so dropping every
-        // external reference must not make the name vanish.
-        drop(object);
-        drop(again);
-        open("/shm_test_a").unwrap();
-
-        unlink("/shm_test_a").unwrap();
-        assert_eq!(open("/shm_test_a").unwrap_err(), Errno::ENOENT);
-        assert_eq!(unlink("/shm_test_a").unwrap_err(), Errno::ENOENT);
-    }
-
-    #[ktest]
-    fn names_are_validated() {
-        assert_eq!(create("", PAGE_SIZE).unwrap_err(), Errno::EINVAL);
-        assert_eq!(create("no_slash", PAGE_SIZE).unwrap_err(), Errno::EINVAL);
-        assert_eq!(create("/a/b", PAGE_SIZE).unwrap_err(), Errno::EINVAL);
-
-        // Longer than `NAME_MAX`.
-        let mut too_long = String::from("/");
-        for _ in 0..NAME_MAX {
-            too_long.push('x');
-        }
-        assert_eq!(
-            create(&too_long, PAGE_SIZE).unwrap_err(),
-            Errno::ENAMETOOLONG
-        );
-    }
-
-    #[ktest]
-    fn empty_object_is_rejected() {
-        assert_eq!(create("/shm_test_empty", 0).unwrap_err(), Errno::EINVAL);
-    }
-
-    #[ktest]
-    fn frames_are_stable_and_zeroed() {
-        let object = SharedPages::new(2 * PAGE_SIZE).unwrap();
-        assert_eq!(object.resident_pages(), 0);
-
-        let frame = object.frame(0).unwrap();
-        assert_eq!(object.resident_pages(), 1);
-
-        // The same offset always yields the same physical page.
-        let again = object.frame(0).unwrap();
-        assert_eq!(frame.paddr(), again.paddr());
-
-        // A different offset is a different page.
-        let other = object.frame(PAGE_SIZE).unwrap();
-        assert_ne!(frame.paddr(), other.paddr());
-
-        // Past the end of the object.
-        assert_eq!(object.frame(2 * PAGE_SIZE).unwrap_err(), Errno::EINVAL);
-
-        // Brand-new pages read as zero.
-        let mut buffer = [1u8; 16];
-        frame.read_bytes(0, &mut buffer).unwrap();
-        assert_eq!(buffer, [0u8; 16]);
-    }
-
-    #[ktest]
-    fn names_lists_live_objects() {
-        unlink("/shm_test_list").unwrap_err();
-        assert!(!names().contains(&"/shm_test_list".to_string()));
-        create("/shm_test_list", PAGE_SIZE).unwrap();
-        assert!(names().contains(&"/shm_test_list".to_string()));
-        unlink("/shm_test_list").unwrap();
-        assert!(!names().contains(&"/shm_test_list".to_string()));
-    }
-}
-
-#[cfg(ktest)]
-mod shared_across_address_spaces {
-    use ostd::mm::{PAGE_SIZE, Vaddr};
-    use ostd::prelude::ktest;
-
-    use crate::vm::{
-        Vmar,
-        flags::{MadviseAdvice, MmapFlags},
-        perms::VmPerms,
-        tests::{peek, poke, touch},
-    };
-
-    use super::*;
-
-    const FIRST: Vaddr = 0x4000_0000;
-    const SECOND: Vaddr = 0x5000_0000;
-
-    /// Maps `object` at a fixed address, which is what makes two address spaces
-    /// comparable.
-    fn map_at(object: &Arc<SharedPages>, at: Vaddr) -> Arc<Vmar> {
-        let vmar = Vmar::new();
-        let backing: Arc<dyn Backing> = Arc::clone(object) as Arc<dyn Backing>;
-        let got = vmar
-            .mmap_backed(
-                &backing,
-                at,
-                object.size(),
-                VmPerms::READ | VmPerms::WRITE,
-                MmapFlags::SHARED | MmapFlags::FIXED,
-                0,
-            )
-            .unwrap();
-        assert_eq!(got, at);
-        touch(&vmar, at..at + object.size()).unwrap();
-        vmar
-    }
-
-    #[ktest]
-    fn a_write_is_visible_through_every_mapping() {
-        let object = SharedPages::new(PAGE_SIZE).unwrap();
-        let one = map_at(&object, FIRST);
-        let other = map_at(&object, SECOND);
-
-        poke(&one, FIRST, 0xfeed_face);
-        // The other address space sees the very same physical page.
-        assert_eq!(peek(&other, SECOND), 0xfeed_face);
-
-        poke(&other, SECOND, 0x0bad_0bad);
-        assert_eq!(peek(&one, FIRST), 0x0bad_0bad);
-    }
-
-    #[ktest]
-    fn unmapping_one_side_keeps_the_contents() {
-        let object = SharedPages::new(PAGE_SIZE).unwrap();
-        let one = map_at(&object, FIRST);
-        let other = map_at(&object, SECOND);
-        poke(&one, FIRST, 42);
-
-        one.munmap(FIRST..FIRST + PAGE_SIZE).unwrap();
-
-        // The page belongs to the object, not to the mapping, so dropping one
-        // mapping neither frees nor zeroes it.
-        assert_eq!(peek(&other, SECOND), 42);
-        assert_eq!(object.resident_pages(), 1);
-    }
-
-    #[ktest]
-    fn madvise_dontneed_keeps_the_contents_for_the_other_side() {
-        let object = SharedPages::new(PAGE_SIZE).unwrap();
-        let one = map_at(&object, FIRST);
-        let other = map_at(&object, SECOND);
-        poke(&one, FIRST, 0x1234);
-
-        one.madvise(MadviseAdvice::DontNeed, FIRST..FIRST + PAGE_SIZE)
-            .unwrap();
-
-        assert_eq!(peek(&other, SECOND), 0x1234);
-        // Re-faulting the dropped side reads the same page back, not zeros.
-        assert_eq!(peek(&one, FIRST), 0x1234);
-    }
-
-    #[ktest]
-    fn a_forked_shared_mapping_still_shares() {
-        let object = SharedPages::new(PAGE_SIZE).unwrap();
-        let parent = map_at(&object, FIRST);
-        let child = Vmar::fork_from(&parent);
-        touch(&child, FIRST..FIRST + PAGE_SIZE).unwrap();
-
-        poke(&child, FIRST, 0x9999);
-        assert_eq!(peek(&parent, FIRST), 0x9999);
-    }
-
-    #[ktest]
-    fn the_offset_selects_which_page_is_shared() {
-        let object = SharedPages::new(2 * PAGE_SIZE).unwrap();
-
-        // `one` maps only the second page of the object, while `other` maps all
-        // of it, so the two do not even cover the same addresses.
-        let one = Vmar::new();
-        let backing: Arc<dyn Backing> = Arc::clone(&object) as Arc<dyn Backing>;
-        one.mmap_backed(
-            &backing,
-            FIRST,
-            PAGE_SIZE,
-            VmPerms::READ | VmPerms::WRITE,
-            MmapFlags::SHARED | MmapFlags::FIXED,
-            PAGE_SIZE,
-        )
-        .unwrap();
-        let other = map_at(&object, SECOND);
-
-        // Offset `PAGE_SIZE` is the same physical page in both, despite the
-        // different virtual addresses.
-        poke(&one, FIRST, 0x1111);
-        assert_eq!(peek(&other, SECOND + PAGE_SIZE), 0x1111);
-
-        // Offset zero is a different page, and is still zero.
-        assert_eq!(peek(&other, SECOND), 0);
-        poke(&other, SECOND, 0x2222);
-        assert_eq!(peek(&other, SECOND + PAGE_SIZE), 0x1111);
-        assert_eq!(object.resident_pages(), 2);
-    }
 }

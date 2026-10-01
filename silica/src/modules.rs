@@ -212,6 +212,37 @@ macro_rules! module_init {
     };
 }
 
+/// Macro for declaring and registering a kernel driver module.
+///
+/// # Examples
+/// ```
+/// module!("VirtIO block driver", "Author Name", main);
+/// module!("Ext2 Filesystem", "SilicaOS Team", InitcallLevel::Fs, init);
+/// ```
+#[macro_export]
+macro_rules! module {
+    ($desc:expr, $author:expr, $init_fn:path) => {
+        pub fn __register_module() {
+            $crate::modules::register_module_declaration(
+                $desc,
+                $author,
+                $crate::modules::InitcallLevel::Device,
+                $init_fn,
+            );
+        }
+    };
+    ($desc:expr, $author:expr, $level:expr, $init_fn:path) => {
+        pub fn __register_module() {
+            $crate::modules::register_module_declaration(
+                $desc,
+                $author,
+                $level,
+                $init_fn,
+            );
+        }
+    };
+}
+
 // ============================================================================
 // 2. Kernel Module Trait & Abstraction
 // ============================================================================
@@ -352,6 +383,61 @@ pub fn init_all_compiled_modules() -> Result<()> {
         init_compiled_module(&name)?;
     }
 
+    Ok(())
+}
+
+/// Wrapper for statically declared kernel modules.
+pub struct StaticKernelModule {
+    pub name: &'static str,
+    pub version: &'static str,
+    pub description: &'static str,
+    pub author: &'static str,
+    pub init_fn: InitcallFn,
+}
+
+impl KernelModule for StaticKernelModule {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn version(&self) -> &'static str {
+        self.version
+    }
+
+    fn description(&self) -> &'static str {
+        self.description
+    }
+
+    fn author(&self) -> &'static str {
+        self.author
+    }
+
+    fn init(&self) -> Result<()> {
+        (self.init_fn)()
+    }
+}
+
+/// Registers a module declaration into both the initcall queue and the module table.
+pub fn register_module_declaration(
+    description: &'static str,
+    author: &'static str,
+    level: InitcallLevel,
+    init_fn: InitcallFn,
+) {
+    register_initcall(level, description, init_fn);
+    register_module(Arc::new(StaticKernelModule {
+        name: description,
+        version: "1.0.0",
+        description,
+        author,
+        init_fn,
+    }));
+}
+
+/// Initializes all staged kernel module initcalls, auto-probes block devices, and mounts filesystems.
+pub fn init_calls() -> Result<()> {
+    do_initcalls()?;
+    crate::fs::auto_probe_and_mount();
     Ok(())
 }
 

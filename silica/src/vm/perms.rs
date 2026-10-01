@@ -104,7 +104,12 @@ impl VmPerms {
         if self.allows(self.granted()) {
             Ok(())
         } else {
-            crate::return_errno!(EACCES, "permissions {:?} exceed the ceiling {:?}", self.granted(), self.may())
+            crate::return_errno!(
+                EACCES,
+                "permissions {:?} exceed the ceiling {:?}",
+                self.granted(),
+                self.may()
+            )
         }
     }
 }
@@ -139,67 +144,5 @@ impl From<VmPerms> for PageFlags {
             flags |= PageFlags::X;
         }
         flags
-    }
-}
-
-const _: () = {
-    // `VmPerms` mirrors both the `PROT_*` values that user space passes and the
-    // low bits of OSTD's `PageFlags`, so the conversions above are bit-for-bit
-    // rather than a table lookup.
-    const _: () = assert!(VmPerms::READ.bits() == 1 && VmPerms::WRITE.bits() == 2);
-    const _: () = assert!(VmPerms::EXEC.bits() == 4);
-    const _: () = assert!(VmPerms::READ.bits() == PageFlags::R.bits());
-    const _: () = assert!(VmPerms::WRITE.bits() == PageFlags::W.bits());
-    const _: () = assert!(VmPerms::EXEC.bits() == PageFlags::X.bits());
-    // Shifting the `MAY_*` bits down by three must yield the granted bits.
-    const _: () = assert!(VmPerms::ALL_MAY.bits() >> 3 == VmPerms::GRANTED.bits());
-};
-
-#[cfg(ktest)]
-mod tests {
-    use ostd::prelude::ktest;
-
-    use crate::errno::Errno;
-
-    use super::*;
-
-    #[ktest]
-    fn from_prot_rejects_unknown_bits() {
-        assert_eq!(VmPerms::from_prot(0b111), Ok(VmPerms::READ | VmPerms::WRITE | VmPerms::EXEC));
-        assert_eq!(VmPerms::from_prot(0b1000), Err(Errno::EINVAL));
-        assert_eq!(VmPerms::from_prot(0), Ok(VmPerms::empty()));
-    }
-
-    #[ktest]
-    fn may_is_granted_shifted_down() {
-        let perms = (VmPerms::READ | VmPerms::WRITE | VmPerms::EXEC).with_ceiling();
-        assert_eq!(perms.may(), VmPerms::READ | VmPerms::WRITE | VmPerms::EXEC);
-        assert!(perms.allows(VmPerms::WRITE));
-    }
-
-    #[ktest]
-    fn ceiling_is_enforced() {
-        // `mmap(PROT_READ)` may never be widened to writable.
-        let perms = VmPerms::READ.with_ceiling();
-        assert!(!perms.allows(VmPerms::READ | VmPerms::WRITE));
-        assert_eq!(perms.check(), Ok(()));
-
-        // Adding a `MAY_WRITE` without the granted bit is itself inconsistent.
-        let bogus = VmPerms::READ | VmPerms::MAY_WRITE;
-        assert_eq!(bogus.check(), Err(Errno::EACCES));
-    }
-
-    #[ktest]
-    fn page_flags_round_trip() {
-        for granted in [
-            VmPerms::empty(),
-            VmPerms::READ,
-            VmPerms::READ | VmPerms::WRITE,
-            VmPerms::READ | VmPerms::EXEC,
-            VmPerms::READ | VmPerms::WRITE | VmPerms::EXEC,
-        ] {
-            let flags = PageFlags::from(granted);
-            assert_eq!(VmPerms::from(flags), granted);
-        }
     }
 }

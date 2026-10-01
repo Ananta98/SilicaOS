@@ -223,4 +223,9 @@ fn init() -> Result<()> {
     }
 }
 
-crate::module!("NVMe PCIe Storage Driver", "Ananta98", init);
+crate::module!(
+    "NVMe PCIe Storage Driver",
+    "Ananta98",
+    crate::modules::InitcallLevel::Device,
+    init
+);

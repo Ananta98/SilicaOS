@@ -18,8 +18,8 @@ pub use fd::*;
 pub use initramfs::read_file_from_initramfs;
 pub use registry::*;
 pub use vfs::{
-    dcache::DEntry, lookup, mount::Mount, open, perms, root, set_root, File, FileOps, FileSystem,
-    INode, Mode, OpenFlags, PathNode,
+    File, FileOps, FileSystem, INode, Mode, OpenFlags, PathNode, dcache::DEntry, lookup,
+    mount::Mount, open, perms, root, set_root,
 };
 
 use crate::fs::devfs::DevFs;

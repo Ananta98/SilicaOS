@@ -10,12 +10,7 @@
 //! - 100% Safe Rust implementation complying with kernel `#![deny(unsafe_code)]`.
 
 use alloc::{
-    borrow::ToOwned,
-    collections::btree_map::BTreeMap,
-    format,
-    string::String,
-    sync::Arc,
-    vec::Vec,
+    borrow::ToOwned, collections::btree_map::BTreeMap, format, string::String, sync::Arc, vec::Vec,
 };
 use core::fmt;
 use spin::Mutex;
@@ -94,7 +89,10 @@ pub fn do_initcalls() -> Result<()> {
     // Sort by initcall level ascending so earlier levels execute first
     entries.sort_by_key(|e| e.level);
 
-    ostd::info!("Executing kernel initcalls ({} registered)...", entries.len());
+    ostd::info!(
+        "Executing kernel initcalls ({} registered)...",
+        entries.len()
+    );
 
     let mut current_level = None;
     for entry in &entries {
@@ -118,99 +116,9 @@ pub fn do_initcalls() -> Result<()> {
     Ok(())
 }
 
-/// Execute all initcalls belonging to a specific level.
-pub fn do_initcall_level(target_level: InitcallLevel) -> Result<()> {
-    let entries = {
-        let list = INITCALL_LIST.lock();
-        let mut matching = Vec::new();
-        for entry in list.iter() {
-            if entry.level == target_level {
-                matching.push(*entry);
-            }
-        }
-        matching
-    };
-
-    for entry in entries {
-        match (entry.func)() {
-            Ok(()) => {
-                ostd::info!("initcall [level {}]: {}() ok", target_level, entry.name);
-            }
-            Err(err) => {
-                ostd::error!("initcall [level {}]: {}() failed: {:?}", target_level, entry.name, err);
-                return Err(err);
-            }
-        }
-    }
-    Ok(())
-}
-
 // ----------------------------------------------------------------------------
-// Linux Initcall Definition Macros
+// Kernel Driver Module Macro
 // ----------------------------------------------------------------------------
-
-#[macro_export]
-macro_rules! early_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Early, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! core_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Core, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! postcore_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::PostCore, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! arch_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Arch, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! subsys_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Subsys, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! fs_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Fs, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! device_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Device, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! late_initcall {
-    ($name:expr, $func:path) => {
-        $crate::modules::register_initcall($crate::modules::InitcallLevel::Late, $name, $func);
-    };
-}
-
-#[macro_export]
-macro_rules! module_init {
-    ($name:expr, $func:path) => {
-        $crate::device_initcall!($name, $func);
-    };
-}
 
 /// Macro for declaring and registering a kernel driver module.
 ///
@@ -221,25 +129,18 @@ macro_rules! module_init {
 /// ```
 #[macro_export]
 macro_rules! module {
-    ($desc:expr, $author:expr, $init_fn:path) => {
-        pub fn __register_module() {
-            $crate::modules::register_module_declaration(
-                $desc,
-                $author,
-                $crate::modules::InitcallLevel::Device,
-                $init_fn,
-            );
-        }
-    };
     ($desc:expr, $author:expr, $level:expr, $init_fn:path) => {
-        pub fn __register_module() {
-            $crate::modules::register_module_declaration(
-                $desc,
-                $author,
-                $level,
-                $init_fn,
-            );
-        }
+        const _: () = {
+            #[used]
+            #[allow(unsafe_code, unsafe_attr_outside_unsafe)]
+            #[unsafe(link_section = ".init_array")]
+            static __INIT_CALL: extern "C" fn() = {
+                extern "C" fn __register() {
+                    $crate::modules::register_module_declaration($desc, $author, $level, $init_fn);
+                }
+                __register
+            };
+        };
     };
 }
 
@@ -334,7 +235,8 @@ pub struct ModuleInfo {
 pub static MODULE_TABLE: Mutex<BTreeMap<String, ModuleInfo>> = Mutex::new(BTreeMap::new());
 
 /// Static compiled-in module registry.
-static COMPILED_MODULES: Mutex<BTreeMap<String, Arc<dyn KernelModule>>> = Mutex::new(BTreeMap::new());
+static COMPILED_MODULES: Mutex<BTreeMap<String, Arc<dyn KernelModule>>> =
+    Mutex::new(BTreeMap::new());
 
 /// Registers a compiled-in kernel module.
 pub fn register_module(module: Arc<dyn KernelModule>) {
@@ -368,20 +270,6 @@ pub fn init_compiled_module(name: &str) -> Result<()> {
             dependencies: Vec::new(),
         },
     );
-
-    Ok(())
-}
-
-/// Initializes all registered compiled-in kernel modules.
-pub fn init_all_compiled_modules() -> Result<()> {
-    let names: Vec<String> = {
-        let table = COMPILED_MODULES.lock();
-        table.keys().cloned().collect()
-    };
-
-    for name in names {
-        init_compiled_module(&name)?;
-    }
 
     Ok(())
 }
@@ -437,7 +325,6 @@ pub fn register_module_declaration(
 /// Initializes all staged kernel module initcalls, auto-probes block devices, and mounts filesystems.
 pub fn init_calls() -> Result<()> {
     do_initcalls()?;
-    crate::fs::auto_probe_and_mount();
     Ok(())
 }
 
@@ -589,8 +476,16 @@ pub fn load_module(elf_data: &[u8], cmdline: &str) -> Result<String> {
     ostd::info!(
         "Loaded module \"{}\" (v:{}, auth:{}) at {:#x} (size: {} KB, entry: {:#x}) [cmdline: \"{}\"]",
         module_info.name,
-        if module_info.version.is_empty() { "0.1.0" } else { &module_info.version },
-        if module_info.author.is_empty() { "unknown" } else { &module_info.author },
+        if module_info.version.is_empty() {
+            "0.1.0"
+        } else {
+            &module_info.version
+        },
+        if module_info.author.is_empty() {
+            "unknown"
+        } else {
+            &module_info.author
+        },
         module_info.load_base,
         module_info.load_size / 1024,
         module_info.entry_point,
@@ -598,7 +493,9 @@ pub fn load_module(elf_data: &[u8], cmdline: &str) -> Result<String> {
     );
 
     let registered_name = module_info.name.clone();
-    MODULE_TABLE.lock().insert(registered_name.clone(), module_info);
+    MODULE_TABLE
+        .lock()
+        .insert(registered_name.clone(), module_info);
 
     Ok(registered_name)
 }

@@ -44,6 +44,10 @@ impl Device for NvmeNamespace {
 }
 
 impl BlockDevice for NvmeNamespace {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
     fn block_size(&self) -> usize {
         self.block_size
     }

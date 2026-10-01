@@ -1,9 +1,20 @@
 [boot]
 method = "qemu-direct"
-initramfs = "build/initramfs.cpio"
 
 [grub]
 boot_protocol = "linux"
+
+[run.boot]
+kcmd_args = [
+    "SHELL=/bin/sh",
+    "LOGNAME=root",
+    "HOME=/",
+    "USER=root",
+    "PATH=/bin:/sbin",
+    "init=/init",
+]
+init_args = ["sh", "-l"]
+initramfs = "build/initramfs.cpio"
 
 [qemu]
 args = """\

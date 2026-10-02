@@ -56,8 +56,9 @@ use ostd::{
 use spin::Once;
 
 use super::{
-    Entity, loadavg, now,
+    Entity,
     entity::BASE_SLICE_NS,
+    loadavg, now,
     rq::{Entry, RunQueue},
     stats,
 };
@@ -79,7 +80,9 @@ pub struct EevdfScheduler {
 impl EevdfScheduler {
     /// Creates a scheduler with an empty runqueue for every CPU.
     fn new() -> Self {
-        let rqs = (0..num_cpus()).map(|_| SpinLock::new(RunQueue::new())).collect();
+        let rqs = (0..num_cpus())
+            .map(|_| SpinLock::new(RunQueue::new()))
+            .collect();
         Self {
             rqs,
             entities: SpinLock::new(BTreeMap::new()),
@@ -115,7 +118,13 @@ impl EevdfScheduler {
         );
 
         let mut rq = self.rq(target_cpu).disable_irq().lock();
-        if still_queued && runnable.schedule_info().cpu.set_if_is_none(target_cpu).is_err() {
+        if still_queued
+            && runnable
+                .schedule_info()
+                .cpu
+                .set_if_is_none(target_cpu)
+                .is_err()
+        {
             // The task is on a runqueue already. This is the race between a
             // task being woken and it going to sleep: the waker got here
             // first, so the task is runnable and this wake is redundant.
@@ -293,11 +302,7 @@ pub fn entity_of(task: &Task) -> Option<Arc<Entity>> {
 
 /// Returns the number of runnable tasks on `cpu`, the idle task excluded.
 pub fn nr_running_on(cpu: CpuId) -> usize {
-    scheduler()
-        .rq(cpu)
-        .disable_irq()
-        .lock()
-        .nr_running()
+    scheduler().rq(cpu).disable_irq().lock().nr_running()
 }
 
 /// Writes the contents of `cpu`'s runqueue to the kernel log.
@@ -323,7 +328,9 @@ pub fn is_system_idle() -> bool {
 
 /// Returns the scheduler, once [`init`] has created it.
 fn scheduler() -> &'static EevdfScheduler {
-    SCHEDULER.get().expect("the scheduler has not been initialised")
+    SCHEDULER
+        .get()
+        .expect("the scheduler has not been initialised")
 }
 
 /// Returns the key a task's scheduling state is stored under.

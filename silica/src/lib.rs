@@ -27,6 +27,7 @@ macro_rules! __log_prefix {
 #[cfg_attr(target_arch = "x86_64", path = "arch/x86_64/mod.rs")]
 pub mod arch;
 
+pub mod api;
 pub mod cmdline;
 pub mod drivers;
 pub mod errno;
@@ -53,6 +54,9 @@ fn kernel_main() {
     if let Err(err) = modules::init_calls() {
         ostd::error!("Module initcalls failed: {:?}", err);
     }
+
+    // Start background memory reclaimer daemon
+    vm::reclaim::init_kswapd();
 
     // Spawn initial userspace process (PID 1)
     if let Err(err) = proc::init::spawn_init_process() {

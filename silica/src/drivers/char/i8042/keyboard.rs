@@ -182,6 +182,8 @@ fn handle_keyboard_irq(_frame: &TrapFrame) {
                         buf.push_back(ch as u8);
                     }
                 }
+                // Feed directly into TTY line discipline and console echo
+                crate::drivers::char::tty::handle_keyboard_char(ch as u8);
                 // Serial log for interactive console feedback
                 ostd::info!("[KEYBOARD] Key: '{}' (scancode: 0x{:02X})", ch, scancode);
             }

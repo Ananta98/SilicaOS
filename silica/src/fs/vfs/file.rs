@@ -56,6 +56,12 @@ pub trait FileOps: Send + Sync {
         crate::return_errno!(ENOTDIR, "not a directory");
     }
 
+    /// Perform a device-specific control command.
+    fn ioctl(&self, cmd: u32, arg: usize) -> Result<usize> {
+        let _ = (cmd, arg);
+        crate::return_errno!(ENOTTY, "inappropriate ioctl for device");
+    }
+
     /// Close the file.
     fn close(&self) -> Result<()> {
         Ok(())
@@ -144,6 +150,11 @@ impl File {
         let new_offset = self.ops.seek(*offset_guard, anchor)?;
         *offset_guard = new_offset;
         Ok(new_offset)
+    }
+
+    /// Performs an ioctl on the underlying file operations.
+    pub fn ioctl(&self, cmd: u32, arg: usize) -> Result<usize> {
+        self.ops.ioctl(cmd, arg)
     }
 
     /// Closes the underlying file operations.

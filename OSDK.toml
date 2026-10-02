@@ -23,11 +23,9 @@ args = """\
     --no-reboot \
     -m 8G \
     -smp 1 \
-    -nographic \
-    -serial chardev:mux \
-    -monitor chardev:mux \
-    -chardev stdio,id=mux,mux=on,signal=off \
-    -display none \
+    -vga std \
+    -display gtk,zoom-to-fit=on \
+    -serial mon:stdio \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
     -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
     -drive if=pflash,format=raw,unit=1,file=/usr/share/OVMF/OVMF_VARS_4M.fd \

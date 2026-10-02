@@ -3,7 +3,9 @@
 pub mod read;
 pub mod stat;
 pub mod write;
+pub mod ioctl;
 
 pub use read::*;
 pub use stat::*;
 pub use write::*;
+pub use ioctl::*;

@@ -8,6 +8,7 @@
 pub mod block;
 pub mod bus;
 pub mod char;
+pub mod drm;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::fmt;
@@ -41,7 +42,7 @@ pub trait CharacterDevice: Send + Sync {
 
     /// Optional: Performs an I/O control operation.
     fn ioctl(&self, _cmd: u32, _arg: usize) -> Result<usize> {
-        crate::return_errno!(EINVAL, "ioctl not supported")
+        crate::return_errno!(ENOTTY, "inappropriate ioctl for device")
     }
 }
 
@@ -139,6 +140,10 @@ pub fn get_blkdevs() -> Vec<Arc<dyn BlockDevice>> {
 /// Initializes the driver subsystem and probes system buses.
 pub fn init() -> Result<()> {
     ostd::info!("Initializing driver subsystem...");
+    char::tty::init();
+    if let Err(e) = drm::init() {
+        ostd::warn!("Failed to initialize DRM/framebuffer subsystem: {:?}", e);
+    }
     bus::pci::init()?;
     Ok(())
 }

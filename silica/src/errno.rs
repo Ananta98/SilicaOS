@@ -57,6 +57,8 @@ pub enum Errno {
     ENFILE = 23,
     /// Too many open files.
     EMFILE = 24,
+    /// Inappropriate ioctl for device.
+    ENOTTY = 25,
     /// No space left on device.
     ENOSPC = 28,
     /// Illegal seek.
@@ -114,6 +116,7 @@ impl Errno {
             Self::EINVAL => "EINVAL",
             Self::ENFILE => "ENFILE",
             Self::EMFILE => "EMFILE",
+            Self::ENOTTY => "ENOTTY",
             Self::ENOSPC => "ENOSPC",
             Self::ESPIPE => "ESPIPE",
             Self::EROFS => "EROFS",
@@ -149,6 +152,7 @@ impl Errno {
             Self::EINVAL => "invalid argument",
             Self::ENFILE => "too many open files in system",
             Self::EMFILE => "too many open files",
+            Self::ENOTTY => "inappropriate ioctl for device",
             Self::ENOSPC => "no space left on device",
             Self::ESPIPE => "illegal seek",
             Self::EROFS => "read-only file system",

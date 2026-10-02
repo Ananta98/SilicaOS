@@ -50,4 +50,8 @@ impl FileOps for GenericChrFileOps {
     fn write(&self, _offset: u64, buf: &[u8]) -> Result<usize> {
         self.dev.write(buf)
     }
+
+    fn ioctl(&self, cmd: u32, arg: usize) -> Result<usize> {
+        self.dev.ioctl(cmd, arg)
+    }
 }

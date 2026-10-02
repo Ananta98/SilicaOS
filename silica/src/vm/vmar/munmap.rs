@@ -17,8 +17,8 @@ impl Vmar {
     /// covers holes is released in part and reported as a success.
     pub fn munmap(&self, range: Range<Vaddr>) -> Result<()> {
         check_page_aligned_range(&range)?;
-        if range.end < range.start {
-            crate::return_errno!(EINVAL, "the range wraps around the address space");
+        if range.end <= range.start {
+            crate::return_errno!(EINVAL, "the range wraps around the address space or is empty");
         }
 
         let mut inner = self.inner.write();

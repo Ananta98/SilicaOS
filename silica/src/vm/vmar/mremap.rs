@@ -116,28 +116,29 @@ impl Vmar {
         }
         let kept = old_size.min(new_size);
 
-        // Shrinking is always done where the mapping already is; there is no
-        // reason to move a mapping to make it smaller.
-        if new_addr.is_none() && new_size < old_size {
-            inner.total_vm = before - old_size + new_size;
-            return Ok(old_addr);
-        }
-
-        // Growing in place is the common case and costs only a record edit, so
-        // it is tried before looking for a new home.
-        if new_addr.is_none() && new_size > old_size {
-            let grow = old_addr + old_size..old_addr + new_size;
-            let usable = is_mappable_range(&grow) && inner.mappings.count_overlap(&grow) == 0;
-            if usable && let Some(key) = inner.mappings.get(old_range.end - 1).map(VmMapping::start)
-            {
-                inner.check_total_fits(self, before - old_size + new_size)?;
-                let mapping = inner
-                    .mappings
-                    .remove(key)
-                    .expect("a key came from this very set");
-                inner.mappings.insert(mapping.enlarge(new_size - old_size));
+        if new_addr.is_none() {
+            // Shrinking (or keeping size same) is always done where the mapping already is.
+            if new_size <= old_size {
                 inner.total_vm = before - old_size + new_size;
                 return Ok(old_addr);
+            }
+
+            // Growing in place is the common case and costs only a record edit, so
+            // it is tried before looking for a new home.
+            if new_size > old_size {
+                let grow = old_addr + old_size..old_addr + new_size;
+                let usable = is_mappable_range(&grow) && inner.mappings.count_overlap(&grow) == 0;
+                if usable && let Some(key) = inner.mappings.get(old_range.end - 1).map(VmMapping::start)
+                {
+                    inner.check_total_fits(self, before - old_size + new_size)?;
+                    let mapping = inner
+                        .mappings
+                        .remove(key)
+                        .expect("a key came from this very set");
+                    inner.mappings.insert(mapping.enlarge(new_size - old_size));
+                    inner.total_vm = before - old_size + new_size;
+                    return Ok(old_addr);
+                }
             }
         }
 

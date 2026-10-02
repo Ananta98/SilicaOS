@@ -309,12 +309,16 @@ impl VmMapping {
 
     /// Applies `perms` to the page table entries of this mapping.
     ///
-    /// The write bit is always cleared, whatever the new permissions are. A
+    /// The write bit is always cleared for private mappings, whatever the new permissions are. A
     /// mapping is only ever widened by the page-fault handler, which is the one
     /// place that can tell whether the page has to be copied first; a private
-    /// page shared with a sibling mapping must stay read-only until then.
+    /// page shared with a sibling mapping must stay read-only until then. Shared
+    /// mappings do not have this restriction.
     pub(super) fn protect(&self, vm_space: &VmSpace, perms: VmPerms) {
-        let new_flags = PageFlags::from(perms) - PageFlags::W;
+        let mut new_flags = PageFlags::from(perms);
+        if !self.shared {
+            new_flags -= PageFlags::W;
+        }
         let range = self.range();
         let guard = disable_preempt();
         let mut cursor = vm_space

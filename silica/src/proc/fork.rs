@@ -20,7 +20,6 @@ use crate::{
         thread::{Thread, ThreadFlags, ThreadInner, ThreadState, alloc_tid},
         tree::{PID_ALLOCATOR, Pid, allproc_insert},
     },
-    sched,
     vm::vmar::Vmar,
 };
 
@@ -86,8 +85,9 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
         .data(weak_thread.clone())
         .local_data(child_vmar_clone);
 
-        let task = sched::build(options, 0).expect("failed to build child task");
+        let task = super::thread::build_task(options, 0);
 
+        let caller_td_inner = caller_td.inner.lock();
         Thread {
             tid: child_tid,
             td_proc: child_proc_weak,
@@ -95,11 +95,11 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
             inner: SpinLock::new(ThreadInner {
                 state: ThreadState::CanRun,
                 flags: ThreadFlags::empty(),
-                sigmask: caller_td.inner.lock().sigmask,
+                sigmask: caller_td_inner.sigmask,
                 sigqueue: super::signal::SigQueue::new(),
                 wchan: None,
                 wmesg: "",
-                name: caller_td.inner.lock().name,
+                name: caller_td_inner.name,
                 user_ctx: Some(child_ctx),
             }),
         }

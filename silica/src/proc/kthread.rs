@@ -18,7 +18,6 @@ use crate::{
         thread::{Thread, ThreadFlags, ThreadInner, ThreadState, alloc_tid},
         tree::{PID_ALLOCATOR, allproc_insert},
     },
-    sched,
     vm::vmar::Vmar,
 };
 use crate::fs::fd::Filedesc;
@@ -64,10 +63,7 @@ pub fn kthread_add(
     let vmar = proc.vmspace();
     let proc_weak = Arc::downgrade(proc);
 
-    let mut name_buf = [0u8; 16];
-    let bytes = name.as_bytes();
-    let len = bytes.len().min(15);
-    name_buf[..len].copy_from_slice(&bytes[..len]);
+    let name_buf = super::comm_from_name(name);
 
     let thread = Arc::new_cyclic(|weak_thread: &Weak<Thread>| {
         let weak_td_clone = weak_thread.clone();
@@ -77,7 +73,7 @@ pub fn kthread_add(
         .data(weak_td_clone)
         .local_data(vmar);
 
-        let task = sched::build(options, nice).expect("failed to build kernel task");
+        let task = super::thread::build_task(options, nice);
 
         Thread {
             tid,

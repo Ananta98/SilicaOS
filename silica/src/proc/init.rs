@@ -71,20 +71,17 @@ pub fn spawn_init_process() -> Result<Arc<Proc>> {
     let (vmar, entry_point, sp) = load_and_setup(elf_data, &[&init_path], &[])?;
 
     // 2. Create Process Control Block for PID 1 with root credentials and stdio
+    //
+    // `Proc::new` already marks PID 1 as the reaper, so there is nothing to set
+    // here.
     let proc = create_init_process_with_vmar(vmar)?;
 
-    // 3. Mark as init reaper (FreeBSD PRS_NORMAL / reaper semantics)
-    {
-        let mut inner = proc.inner.lock();
-        inner.is_reaper = true;
-    }
-
-    // 4. Set up user context
+    // 3. Set up user context
     let mut user_ctx = ostd::arch::cpu::context::UserContext::default();
     user_ctx.set_instruction_pointer(entry_point);
     user_ctx.set_stack_pointer(sp);
 
-    // 5. Create and run primary init thread
+    // 4. Create and run primary init thread
     let thread = create_main_thread(&proc, user_ctx)?;
     thread.run();
 

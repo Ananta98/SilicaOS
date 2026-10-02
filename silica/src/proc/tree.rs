@@ -5,7 +5,7 @@
 //! Manages process tree hierarchy, process lookups, PID allocation, and reparenting
 //! to designated reapers or init (PID 1).
 
-use alloc::{collections::{BTreeMap, BTreeSet}, sync::Arc};
+use alloc::{collections::{BTreeMap, BTreeSet}, sync::Arc, vec::Vec};
 use core::num::NonZeroU32;
 use ostd::sync::{RwLock, SpinLock};
 
@@ -48,9 +48,18 @@ pub struct PidAllocator {
 }
 
 impl PidAllocator {
+    /// The first PID handed out by [`Self::allocate`].
+    ///
+    /// PID 1 belongs to init, so allocation starts after it rather than at it.
+    /// Booting code creates kernel processes before init exists -- the memory
+    /// reclaimer registers `kswapd0` first -- and an allocator starting at 1 gave
+    /// that daemon init's identifier. Reserving 1 from the start makes that
+    /// unrepresentable instead of relying on init being the first process created.
+    const FIRST_ALLOCATABLE: u32 = 2;
+
     pub const fn new() -> Self {
         Self {
-            next: 1,
+            next: Self::FIRST_ALLOCATABLE,
             allocated: BTreeSet::new(),
         }
     }
@@ -143,35 +152,72 @@ pub fn allproc_count() -> usize {
     tree.allproc.len()
 }
 
-/// Finds the designated reaper for `proc` by traversing up the ancestor chain.
-/// If no reaper process is configured, defaults to PID 1 (init).
-pub fn tree_find_reaper(proc: &Proc) -> Pid {
-    let mut current_ppid = proc.inner.lock().ppid;
-    while let Some(ppid) = current_ppid {
-        if let Some(parent) = allproc_find(ppid) {
+/// Finds the designated reaper for a process by walking up the ancestor chain
+/// from `ppid`. If no ancestor is a reaper, defaults to PID 1 (init).
+///
+/// This takes a [`Pid`] rather than a [`Proc`] on purpose. It has to inspect each
+/// ancestor's `ProcInner`, and accepting the whole `Proc` made it natural to call
+/// it while that process's own `inner` was already locked — which
+/// [`super::exit::exit1`] did, deadlocking on the non-reentrant `SpinLock`.
+/// Starting from a bare `ppid` means no lock is ever held on entry.
+///
+/// # Locking
+///
+/// Each iteration acquires an ancestor's `inner` and releases it before the next
+/// lookup, so no two `Proc::inner` locks are ever held at once.
+pub fn tree_find_reaper(ppid: Option<Pid>) -> Pid {
+    let mut current = ppid;
+    while let Some(candidate) = current {
+        let Some(parent) = allproc_find(candidate) else {
+            // The ancestor is already gone; fall back to init.
+            break;
+        };
+        let (is_reaper, parent_ppid) = {
             let inner = parent.inner.lock();
-            if inner.is_reaper {
-                return ppid;
-            }
-            current_ppid = inner.ppid;
-        } else {
+            (inner.is_reaper, inner.ppid)
+        };
+        if is_reaper {
+            return candidate;
+        }
+        // Guard against a cycle introduced by a corrupt reparenting, which would
+        // otherwise spin here forever.
+        if parent_ppid == current {
             break;
         }
+        current = parent_ppid;
     }
     PID_INIT
 }
 
 /// Reparents a list of children to `reaper_pid`.
+///
+/// # Locking
+///
+/// Each child's `inner` is locked and released in its own iteration, and the
+/// reaper's `inner` is taken once at the end. Holding the reaper's lock across
+/// the per-child updates would nest two `Proc::inner` locks, and two processes
+/// exiting at the same time could then take them in opposite orders and hang.
 pub fn tree_reparent_children(children: &[Pid], reaper_pid: Pid) {
-    if let Some(reaper) = allproc_find(reaper_pid) {
-        let mut reaper_inner = reaper.inner.lock();
-        for &child_pid in children {
-            if let Some(child) = allproc_find(child_pid) {
-                child.inner.lock().ppid = Some(reaper_pid);
-                if !reaper_inner.children.contains(&child_pid) {
-                    reaper_inner.children.push(child_pid);
-                }
-            }
+    let Some(reaper) = allproc_find(reaper_pid) else {
+        return;
+    };
+
+    let mut reparented = Vec::new();
+    for &child_pid in children {
+        if let Some(child) = allproc_find(child_pid) {
+            child.inner.lock().ppid = Some(reaper_pid);
+            reparented.push(child_pid);
+        }
+    }
+
+    if reparented.is_empty() {
+        return;
+    }
+
+    let mut reaper_inner = reaper.inner.lock();
+    for child_pid in reparented {
+        if !reaper_inner.children.contains(&child_pid) {
+            reaper_inner.children.push(child_pid);
         }
     }
 }

@@ -70,6 +70,13 @@ impl Signal {
     pub const fn is_unblockable(&self) -> bool {
         matches!(self, Self::SIGKILL | Self::SIGSTOP)
     }
+
+    /// The index of this signal's entry in [`SigActs::actions`].
+    ///
+    /// Signals are numbered from one, so this is `as_u32() - 1`.
+    const fn index(&self) -> usize {
+        (self.as_u32() - 1) as usize
+    }
 }
 
 /// 64-bit signal bitmask (`sigset_t`).
@@ -86,25 +93,19 @@ impl SigSet {
     }
 
     pub fn add(&mut self, sig: Signal) {
-        self.0 |= 1 << (sig.as_u32() - 1);
+        self.0 |= 1 << sig.index();
     }
 
     pub fn del(&mut self, sig: Signal) {
-        self.0 &= !(1 << (sig.as_u32() - 1));
+        self.0 &= !(1 << sig.index());
     }
 
     pub fn contains(&self, sig: Signal) -> bool {
-        (self.0 & (1 << (sig.as_u32() - 1))) != 0
+        (self.0 & (1 << sig.index())) != 0
     }
 
     pub fn is_empty(&self) -> bool {
         self.0 == 0
-    }
-
-    /// Removes unblockable signals from the mask (SIGKILL and SIGSTOP).
-    pub fn sanitize_mask(&mut self) {
-        self.del(Signal::SIGKILL);
-        self.del(Signal::SIGSTOP);
     }
 }
 
@@ -125,28 +126,42 @@ pub enum SigHandler {
 pub struct SigAction {
     pub sa_handler: SigHandler,
     pub sa_mask: SigSet,
+    /// Flags from `struct sigaction.sa_flags`.
+    ///
+    /// TODO: ignored entirely. `SA_NOCLDSTOP`, `SA_ONSTACK`, `SA_RESTART`,
+    /// `SA_SIGINFO`, `SA_NODEFER` and `SA_RESETHAND` are all stored and none is
+    /// ever read.
     pub sa_flags: u32,
+    /// The user-space address a handler returns to.
+    ///
+    /// TODO: there is no `rt_sigaction` syscall to supply one, and no vDSO for the
+    /// kernel to point `sa_restorer` at, so a `Handler` disposition cannot be
+    /// delivered to at all.
+    pub sa_restorer: usize,
 }
+
+/// The number of signal dispositions, indexed by `Signal::as_u32() - 1`.
+pub const SIGACTS_LEN: usize = 64;
 
 /// Process signal actions table (mirrors FreeBSD `struct sigacts`).
 pub struct SigActs {
-    pub actions: [SigAction; 64],
+    pub actions: [SigAction; SIGACTS_LEN],
 }
 
 impl SigActs {
     pub fn new() -> Self {
         Self {
-            actions: [SigAction::default(); 64],
+            actions: [SigAction::default(); SIGACTS_LEN],
         }
     }
 
     pub fn get(&self, sig: Signal) -> SigAction {
-        self.actions[(sig.as_u32() - 1) as usize]
+        self.actions[sig.index()]
     }
 
     pub fn set(&mut self, sig: Signal, act: SigAction) {
         if !sig.is_unblockable() {
-            self.actions[(sig.as_u32() - 1) as usize] = act;
+            self.actions[sig.index()] = act;
         }
     }
 }
@@ -157,7 +172,14 @@ impl Default for SigActs {
     }
 }
 
-/// Pending signals queue.
+/// Pending signals.
+///
+/// A set rather than a queue: POSIX does not queue the standard signals, and this
+/// holds no `siginfo_t`, so a signal that arrives twice collapses into one with no
+/// record of who sent the first.
+///
+/// TODO: carry a payload. `kill(2)` and `rt_sigaction(2)` do not exist, so there
+/// is no sender, no `si_code`, and no `si_addr` to report for SIGSEGV.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SigQueue {
     pub pending: SigSet,

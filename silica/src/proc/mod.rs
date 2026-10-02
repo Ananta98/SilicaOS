@@ -4,6 +4,12 @@
 //!
 //! Provides the process control block ([`Proc`]), lifecycle state machine,
 //! address space bindings, credentials, and hierarchy relationships.
+//!
+//! [`Proc`] holds no lifecycle logic of its own beyond the accessors that keep
+//! its fields coherent; the operations on a process live in the modules that
+//! mirror the FreeBSD kernel file they come from ([`fork`], [`exec`], [`exit`],
+//! [`wait`], [`kthread`], [`init`]). [`tree`] owns the global process table and
+//! the lock order that goes with it.
 
 pub mod cred;
 pub mod limit;
@@ -15,10 +21,7 @@ pub mod wait;
 pub mod kthread;
 pub mod fork;
 pub mod exec;
-pub mod stack;
 pub mod init;
-
-pub use init::spawn_init_process;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use ostd::sync::SpinLock;
@@ -36,11 +39,24 @@ use self::{
 };
 use crate::fs::fd::Filedesc;
 
+/// The width of a process command name, including the NUL terminator that
+/// terminates a shorter name.
+const COMM_LEN: usize = 16;
+
+/// Builds a NUL-padded command name from `name`.
+///
+/// Truncation keeps the trailing NUL, so the result is always a valid C string
+/// when read up to the first NUL by [`Proc::comm_name`].
+fn comm_from_name(name: &str) -> [u8; COMM_LEN] {
+    let mut comm = [0u8; COMM_LEN];
+    let len = name.len().min(COMM_LEN - 1);
+    comm[..len].copy_from_slice(&name.as_bytes()[..len]);
+    comm
+}
+
 /// Process lifecycle state machine mirroring FreeBSD `p_state` / `PRS_*`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcState {
-    /// Process is being created, resources are being allocated.
-    New,
     /// Process is alive and actively running or sleeping (FreeBSD PRS_NORMAL).
     Alive,
     /// Process has terminated via `exit1` and is waiting for parent/reaper to reap (FreeBSD PRS_ZOMBIE).
@@ -80,11 +96,16 @@ impl ExitStatus {
 pub struct ProcInner {
     pub state: ProcState,
     pub ppid: Option<Pid>,
+    /// An explicit reaper for orphaned children.
+    ///
+    /// TODO: subreaper support. Nothing assigns this yet, so it is always `None`
+    /// and [`exit::exit1`] always resolves the reaper by walking the ancestor
+    /// chain in [`tree::tree_find_reaper`].
     pub reaper: Option<Pid>,
     pub children: Vec<Pid>,
     pub threads: Vec<Arc<Thread>>,
     pub xstat: Option<ExitStatus>,
-    pub comm: [u8; 16],
+    pub comm: [u8; COMM_LEN],
     pub is_reaper: bool,
 }
 
@@ -128,11 +149,6 @@ impl Proc {
         sigacts: Arc<SpinLock<SigActs>>,
         comm_name: &str,
     ) -> Arc<Self> {
-        let mut comm = [0u8; 16];
-        let bytes = comm_name.as_bytes();
-        let copy_len = bytes.len().min(15);
-        comm[..copy_len].copy_from_slice(&bytes[..copy_len]);
-
         let is_reaper = pid == tree::PID_INIT;
 
         Arc::new(Self {
@@ -144,7 +160,7 @@ impl Proc {
                 children: Vec::new(),
                 threads: Vec::new(),
                 xstat: None,
-                comm,
+                comm: comm_from_name(comm_name),
                 is_reaper,
             }),
             vmspace: SpinLock::new(vmspace),
@@ -215,6 +231,15 @@ impl Proc {
     }
 
     /// Posts a signal to the process and alerts threads.
+    ///
+    /// TODO: this only sets `TDF_ASTPENDING`, and nothing outside `proc` reads
+    /// that flag -- `sched` tracks tasks by pointer identity and never inspects
+    /// thread state. A signal aimed at a thread that is currently *dequeued* is
+    /// therefore queued but never delivered, and one aimed at a process with no
+    /// threads is queued and dropped. Making delivery reliable needs a real wake
+    /// path: `ostd::sync::Waiter::new_pair` to publish a `Waker` a blocked thread
+    /// can be woken through, plus a `UserModeHooks::has_kernel_event` that reports
+    /// `TDF_ASTPENDING` so `UserMode::execute` returns at an AST point.
     pub fn post_signal(&self, signal: Signal) {
         // Discard if ignored
         if self.sigacts.lock().get(signal).sa_handler == signal::SigHandler::Ignore {
@@ -245,27 +270,18 @@ impl Proc {
         let len = inner.comm.iter().position(|&b| b == 0).unwrap_or(inner.comm.len());
         String::from_utf8_lossy(&inner.comm[..len]).into_owned()
     }
-
-    /// Returns the active address space.
-    pub fn vmar(&self) -> Arc<Vmar> {
-        self.vmspace()
-    }
-}
-
-/// Convenience module for ELF loader operations.
-pub mod elf {
-    pub use super::exec::{load_and_setup, load_elf, setup_user_stack};
-}
-
-/// Creates the initial user process (`init`, PID 1).
-pub fn create_init_process() -> Result<Arc<Proc>> {
-    create_init_process_with_vmar(Vmar::new())
 }
 
 /// Creates the initial user process (`init`, PID 1) with a given address space.
+///
+/// PID 1 is reserved here rather than on a separate path: `PidAllocator` hands
+/// out any unallocated number starting from 1, so unless PID 1 is marked
+/// allocated before the first `allocate()`, init's own identifier can be given
+/// to some later process.
 pub fn create_init_process_with_vmar(vmar: Arc<Vmar>) -> Result<Arc<Proc>> {
     let pid = tree::PID_INIT;
-    let _ = tree::PID_ALLOCATOR.lock().reserve(pid);
+    tree::PID_ALLOCATOR.lock().reserve(pid)?;
+
     let fd_table = Arc::new(SpinLock::new(Filedesc::with_stdio()));
     let cred = Arc::new(Ucred::root());
     let limit = Arc::new(Plimit::default_limits());
@@ -296,11 +312,7 @@ pub fn create_user_thread(
     let tid = thread::alloc_tid();
     let vmar = proc.vmspace();
     let proc_weak = Arc::downgrade(proc);
-
-    let mut name_buf = [0u8; 16];
-    let bytes = name.as_bytes();
-    let len = bytes.len().min(15);
-    name_buf[..len].copy_from_slice(&bytes[..len]);
+    let name_buf = comm_from_name(name);
 
     let thread = Arc::new_cyclic(|weak_thread: &alloc::sync::Weak<Thread>| {
         let weak_for_closure = weak_thread.clone();
@@ -314,7 +326,7 @@ pub fn create_user_thread(
         .data(weak_for_task)
         .local_data(vmar);
 
-        let task = crate::sched::build(options, nice).expect("failed to build user task");
+        let task = thread::build_task(options, nice);
 
         Thread {
             tid,
@@ -343,80 +355,4 @@ pub fn create_main_thread(
     user_ctx: ostd::arch::cpu::context::UserContext,
 ) -> Result<Arc<Thread>> {
     create_user_thread(proc, "init", user_ctx, 0)
-}
-
-/// Creates a new user process.
-pub fn create_process(name: &str) -> Result<Arc<Proc>> {
-    let pid = tree::PID_ALLOCATOR.lock().allocate()?;
-    let vmar = Vmar::new();
-    let fd_table = Arc::new(SpinLock::new(Filedesc::new()));
-    let cred = Arc::new(Ucred::root());
-    let limit = Arc::new(Plimit::default_limits());
-    let sigacts = Arc::new(SpinLock::new(SigActs::new()));
-
-    let proc = Proc::new(
-        pid,
-        None,
-        vmar,
-        fd_table,
-        cred,
-        limit,
-        sigacts,
-        name,
-    );
-
-    tree::allproc_insert(Arc::clone(&proc));
-    Ok(proc)
-}
-
-/// Forks a process structure and address space.
-pub fn fork_process(parent: &Arc<Proc>) -> Result<Arc<Proc>> {
-    let child_pid = tree::PID_ALLOCATOR.lock().allocate()?;
-    let parent_vmar = parent.vmspace();
-    let child_vmar = Vmar::fork_from(&parent_vmar);
-    let child_fd = Arc::new(SpinLock::new(parent.fd_table.lock().clone_table()));
-    let child_cred = parent.cred();
-    let child_limit = parent.limit();
-    let child_sigacts = Arc::new(SpinLock::new(signal::SigActs {
-        actions: parent.sigacts.lock().actions,
-    }));
-
-    let child = Proc::new(
-        child_pid,
-        Some(parent.pid),
-        child_vmar,
-        child_fd,
-        child_cred,
-        child_limit,
-        child_sigacts,
-        &parent.comm_name(),
-    );
-
-    parent.inner.lock().children.push(child_pid);
-    tree::allproc_insert(Arc::clone(&child));
-    Ok(child)
-}
-
-/// Terminates a process with the given exit code.
-pub fn exit_process(proc: &Arc<Proc>, code: i32) {
-    if let Some(td) = proc.main_thread() {
-        exit::exit1(&td, ExitStatus::Exited(code));
-    } else {
-        let mut inner = proc.inner.lock();
-        inner.state = ProcState::Zombie;
-        inner.xstat = Some(ExitStatus::Exited(code));
-        let ppid = inner.ppid;
-        drop(inner);
-
-        if let Some(parent) = ppid.and_then(tree::allproc_find) {
-            parent.post_signal(signal::Signal::SIGCHLD);
-            wait::notify_waiters(parent.pid);
-        }
-    }
-}
-
-/// Waits for a specific child process to change state.
-pub fn waitpid(parent: &Arc<Proc>, target_pid: Pid, _options: u32) -> Result<wait::WaitResult> {
-    let res = wait::kern_wait6(parent, wait::IdType::Pid(target_pid), wait::WaitOptions::WEXITED)?;
-    res.ok_or(crate::errno::Errno::ECHILD)
 }

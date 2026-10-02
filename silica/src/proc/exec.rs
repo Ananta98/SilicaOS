@@ -262,6 +262,11 @@ pub fn load_and_setup(
 }
 
 /// FreeBSD `kern_execve`: loads a new program into the calling thread's process.
+///
+/// TODO: this replaces the running thread's program in place, by entering
+/// [`Thread::user_loop`] again from inside the syscall that is meant to replace
+/// it. The call never returns, the previous program is not torn down, and no
+/// syscall dispatches here yet.
 pub fn kern_execve(
     td: &Thread,
     path: &str,
@@ -271,6 +276,10 @@ pub fn kern_execve(
     let proc = td.proc().ok_or(Errno::ESRCH)?;
 
     // Locate binary from initramfs
+    //
+    // TODO: resolve through the VFS. `fs::open` and `fs::lookup` exist and would
+    // honour mounts and the working directory; going straight to the initramfs
+    // means an `execve` can only ever reach the archive built at boot.
     let elf_data = crate::fs::read_file_from_initramfs(path).ok_or(Errno::ENOENT)?;
 
     // Load ELF and build new address space
@@ -290,17 +299,16 @@ pub fn kern_execve(
     }
 
     // Swap process address space
+    //
+    // TODO: the task's own copy is not updated. `Arc<Vmar>` is also stashed as the
+    // task's `local_data` when the thread is built, and that is what
+    // `vm::current_vmar` returns, so every page fault taken after this point is
+    // resolved against the address space being replaced.
     proc.set_vmspace(Arc::clone(&new_vmar));
     new_vmar.activate();
 
     // Update command name
-    {
-        let mut inner = proc.inner.lock();
-        let bytes = path.as_bytes();
-        let len = bytes.len().min(15);
-        inner.comm = [0u8; 16];
-        inner.comm[..len].copy_from_slice(&bytes[..len]);
-    }
+    proc.inner.lock().comm = super::comm_from_name(path);
 
     // Initialize user context and enter userspace loop
     let mut user_ctx = ostd::arch::cpu::context::UserContext::default();

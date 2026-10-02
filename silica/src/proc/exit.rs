@@ -5,7 +5,7 @@
 //! Implements `exit1` for process termination, zombie state transitions,
 //! orphan reparenting to designated reapers, and resource reclamation via `proc_reap`.
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use crate::errno::{Errno, Result};
 use super::{
     ExitStatus, Proc, ProcState,
@@ -18,8 +18,12 @@ use super::{
 pub fn exit1(td: &Thread, status: ExitStatus) {
     let proc = td.proc().expect("thread must belong to process");
 
-    // 1. Transition process state to Zombie under lock
-    let (children_to_reparent, ppid, reaper_pid) = {
+    // 1. Transition process state to Zombie under lock.
+    //
+    // The reaper is only *read* here. Resolving it needs the ancestors' locks, so
+    // it must happen after this guard is dropped; doing it inside the block would
+    // re-lock `proc.inner` and deadlock, since `SpinLock` is not reentrant.
+    let (children_to_reparent, ppid, reaper) = {
         let mut inner = proc.inner.lock();
         if inner.state == ProcState::Zombie {
             return;
@@ -27,10 +31,10 @@ pub fn exit1(td: &Thread, status: ExitStatus) {
         inner.state = ProcState::Zombie;
         inner.xstat = Some(status);
 
-        let reaper = inner.reaper.unwrap_or_else(|| tree_find_reaper(&proc));
         let children = core::mem::take(&mut inner.children);
-        (children, inner.ppid, reaper)
+        (children, inner.ppid, inner.reaper)
     };
+    let reaper_pid = reaper.unwrap_or_else(|| tree_find_reaper(ppid));
 
     // 2. Tear down open files
     proc.fd_table.lock().close_all();
@@ -43,7 +47,7 @@ pub fn exit1(td: &Thread, status: ExitStatus) {
                 .is_some_and(|c| c.state() == ProcState::Zombie);
             if is_zombie && let Some(reaper) = allproc_find(reaper_pid) {
                 reaper.post_signal(Signal::SIGCHLD);
-                super::wait::notify_waiters(reaper_pid);
+                super::wait::notify_child_events();
             }
         }
     }
@@ -51,13 +55,22 @@ pub fn exit1(td: &Thread, status: ExitStatus) {
     // 4. Notify parent process via SIGCHLD and wake wait queues
     if let Some(parent) = ppid.and_then(allproc_find) {
         parent.post_signal(Signal::SIGCHLD);
-        super::wait::notify_waiters(parent.pid);
+        super::wait::notify_child_events();
     }
 
-    // 5. Mark thread dead
-    {
-        let mut td_inner = td.inner.lock();
-        td_inner.state = ThreadState::Dead;
+    // 5. Mark every thread of the process dead, not just the caller.
+    //
+    // `proc_reap` drops the last strong `Arc<Proc>` once the zombie is collected,
+    // and a surviving sibling's `Thread::td_proc` is a `Weak`. Leaving it alive
+    // would let it run user code with no process behind it, and its next
+    // `proc()` would fail.
+    //
+    // TODO: this only marks the state. OSTD has no way to cancel a `Task`, so a
+    // sibling that is mid-`UserMode::execute` keeps running user code until that
+    // call returns. Properly terminating it needs task cancellation in `sched/`.
+    let threads: Vec<_> = proc.inner.lock().threads.clone();
+    for thread in &threads {
+        thread.inner.lock().state = ThreadState::Dead;
     }
 }
 

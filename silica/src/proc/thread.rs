@@ -15,11 +15,12 @@ use bitflags::bitflags;
 use ostd::{
     arch::cpu::context::{CpuException, UserContext},
     sync::SpinLock,
-    task::Task,
+    task::{Task, TaskOptions},
     user::{DummyUserHooks, ReturnReason, UserMode},
 };
 
 use super::{
+    COMM_LEN,
     ExitStatus,
     Proc,
     signal::{SigQueue, SigSet, Signal},
@@ -50,10 +51,43 @@ impl core::fmt::Display for Tid {
 
 static NEXT_TID: AtomicU32 = AtomicU32::new(1);
 
+/// The largest thread identifier handed out before `alloc_tid` wraps.
+pub const TID_MAX: u32 = u32::MAX / 2;
+
 /// Allocates a unique TID.
+///
+/// Wrapping restarts at 1 rather than 0. `Tid` wraps a [`NonZeroU32`], and a plain
+/// `fetch_add` that reached 0 would be forced back onto 1 -- the identifier init's
+/// thread already owns -- and so would hand out a live TID.
+///
+/// TODO: identifiers are never reclaimed, so the space eventually wraps and can
+/// collide with a thread that is still alive. Reuse needs a free list fed by
+/// [`super::Proc::remove_thread`], which nothing calls yet.
 pub fn alloc_tid() -> Tid {
-    let id = NEXT_TID.fetch_add(1, Ordering::Relaxed);
-    Tid(NonZeroU32::new(id).unwrap_or(NonZeroU32::MIN))
+    let id = NEXT_TID
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+            Some(if cur >= TID_MAX { 1 } else { cur + 1 })
+        })
+        // `fetch_update` only fails when the closure returns `None`, which it never
+        // does, so the current value is returned unchanged.
+        .unwrap_or(TID_MAX);
+    Tid(NonZeroU32::new(id).expect("alloc_tid never yields 0"))
+}
+
+/// Builds the OSTD task that backs a thread.
+///
+/// # Panics
+///
+/// Not recoverable, and deliberately so. A thread without a task to run has no
+/// meaning, and the callers are inside `Arc::new_cyclic`, whose closure returns
+/// the `Thread` and so cannot hand a failure back. Every caller already returns
+/// `Result` for its other fallible step (allocating a PID), which makes an
+/// `expect` here read as though the error could be propagated.
+pub fn build_task(options: TaskOptions, nice: i8) -> Arc<Task> {
+    match crate::sched::build(options, nice) {
+        Ok(task) => task,
+        Err(err) => panic!("cannot create a task for a new thread: {err:?}"),
+    }
 }
 
 bitflags! {
@@ -61,9 +95,10 @@ bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
     pub struct ThreadFlags: u32 {
         /// Asynchronous System Trap pending (signals, resched).
+        ///
+        /// Nothing outside `proc` reads this yet, so setting it does not by itself
+        /// get the thread to run again. See [`super::Proc::post_signal`].
         const TDF_ASTPENDING   = 1 << 0;
-        /// Preemption requested by scheduler.
-        const TDF_NEEDRESCHED  = 1 << 1;
         /// Thread is a kernel-only thread.
         const TDF_KTHREAD      = 1 << 2;
     }
@@ -72,10 +107,15 @@ bitflags! {
 /// Thread lifecycle state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThreadState {
-    Inactive,
     CanRun,
     Running,
     Sleeping,
+    /// Stopped by a job-control signal.
+    ///
+    /// TODO: job control. Nothing sets this back to `CanRun` -- SIGSTOP and SIGTSTP
+    /// have no continuation path, and `SIGCONT` is not delivered -- and
+    /// [`Thread::user_loop`] never tests for it, so a thread marked `Stopped` keeps
+    /// running user code.
     Stopped,
     Dead,
 }
@@ -86,9 +126,16 @@ pub struct ThreadInner {
     pub flags: ThreadFlags,
     pub sigmask: SigSet,
     pub sigqueue: SigQueue,
+    /// The object this thread is blocked on, for diagnostics.
+    ///
+    /// TODO: blocking is done by parking on an `ostd::sync::WaitQueue`, which keeps
+    /// the reason inside the closure rather than here, so nothing ever sets this.
     pub wchan: Option<usize>,
+    /// A printable name for `wchan`.
+    ///
+    /// TODO: see [`Self::wchan`]; never set.
     pub wmesg: &'static str,
-    pub name: [u8; 16],
+    pub name: [u8; COMM_LEN],
     pub user_ctx: Option<UserContext>,
 }
 
@@ -97,6 +144,10 @@ pub struct Thread {
     /// Unique thread identifier.
     pub tid: Tid,
     /// Weak back-reference to the containing Process. Prevents reference cycles.
+    ///
+    /// Weak means a thread outlives its process if it is still running: the last
+    /// strong [`Proc`] reference goes away when the zombie is reaped, and
+    /// [`Self::proc`] then returns `None`.
     pub td_proc: Weak<Proc>,
     /// Underlying execution context provided by OSTD.
     pub td_kstack: Arc<Task>,
@@ -105,29 +156,6 @@ pub struct Thread {
 }
 
 impl Thread {
-    /// Creates a new Thread wrapping an OSTD Task.
-    pub fn new(tid: Tid, proc: &Arc<Proc>, task: Arc<Task>) -> Arc<Self> {
-        let mut name = [0u8; 16];
-        name[0] = b't';
-        name[1] = b'h';
-        name[2] = b'r';
-        Arc::new(Self {
-            tid,
-            td_proc: Arc::downgrade(proc),
-            td_kstack: task,
-            inner: SpinLock::new(ThreadInner {
-                state: ThreadState::CanRun,
-                flags: ThreadFlags::empty(),
-                sigmask: SigSet::empty(),
-                sigqueue: SigQueue::new(),
-                wchan: None,
-                wmesg: "",
-                name,
-                user_ctx: None,
-            }),
-        })
-    }
-
     /// Upgrades the weak process pointer to retrieve the parent process.
     pub fn proc(&self) -> Option<Arc<Proc>> {
         self.td_proc.upgrade()
@@ -159,15 +187,16 @@ impl Thread {
 
     /// Checks if unmasked signals are pending and handles them.
     pub fn handle_ast(&self) -> bool {
-        let mut inner = self.inner.lock();
-        if !inner.flags.contains(ThreadFlags::TDF_ASTPENDING) {
-            return false;
+        {
+            let inner = self.inner.lock();
+            if !inner.flags.contains(ThreadFlags::TDF_ASTPENDING) {
+                return false;
+            }
         }
 
-        let sigmask = inner.sigmask;
+        let sigmask = self.inner.lock().sigmask;
         // Check thread queue then process queue
-        let thread_sig = inner.sigqueue.pop_unmasked(sigmask);
-        drop(inner);
+        let thread_sig = self.inner.lock().sigqueue.pop_unmasked(sigmask);
 
         let sig = if let Some(sig) = thread_sig {
             Some(sig)
@@ -180,11 +209,23 @@ impl Thread {
 
         if let Some(sig) = sig {
             self.deliver_signal(sig);
-            true
-        } else {
-            self.inner.lock().flags.remove(ThreadFlags::TDF_ASTPENDING);
-            false
+            return true;
         }
+
+        // Nothing was deliverable. Only stand down if both queues are actually
+        // empty: a signal that is still masked is not lost, it is deferred until
+        // the mask is opened, and clearing the flag here would strand it with
+        // nothing left to re-arm the trap.
+        let thread_queue_empty = self.inner.lock().sigqueue.is_empty();
+        let proc_queue_empty = self
+            .proc()
+            .is_none_or(|proc| proc.sigqueue.lock().is_empty());
+
+        if thread_queue_empty && proc_queue_empty {
+            self.inner.lock().flags.remove(ThreadFlags::TDF_ASTPENDING);
+            return false;
+        }
+        true
     }
 
     /// Delivers a signal or executes default action.
@@ -216,23 +257,35 @@ impl Thread {
                 }
             }
             super::signal::SigHandler::Handler(_handler_addr) => {
-                // In full POSIX, set up signal frame on user stack and redirect rip.
-                // For basic signal dispatch without user trampoline, log notice.
+                // TODO: user handlers. Nothing sets a disposition either --
+                // `rt_sigaction` does not exist, so `SigHandler::Handler` is
+                // unreachable -- and a handler needs a signal frame built on the
+                // user stack plus a restorer trampoline, neither of which exists.
                 ostd::info!("Signal {} handled by user handler", sig.as_u32());
             }
         }
     }
 
     /// Primary userspace execution loop for user threads.
+    ///
+    /// Returns when the thread dies, or when its process has been collected and
+    /// `Self::proc` can no longer be resolved.
     pub fn user_loop(&self, initial_ctx: UserContext) {
-        let vmar = self.proc().expect("thread must belong to process").vmspace();
+        // The process holds the only strong references to its threads, so reaping
+        // the last of them drops it. A thread that is still running at that point
+        // has no process left and must not keep executing user code.
+        let Some(proc) = self.proc() else {
+            return;
+        };
+        let vmar = proc.vmspace();
         vmar.activate();
 
         let mut user_mode = UserMode::new(initial_ctx);
 
         loop {
             // Check AST / pending signals prior to entering Ring 3
-            if self.handle_ast() && self.inner.lock().state == ThreadState::Dead {
+            self.handle_ast();
+            if self.is_dead() {
                 return;
             }
 
@@ -241,9 +294,6 @@ impl Thread {
             match return_reason {
                 ReturnReason::UserSyscall => {
                     crate::syscall::dispatch(user_mode.context_mut());
-                    if self.inner.lock().state == ThreadState::Dead {
-                        return;
-                    }
                 }
                 ReturnReason::UserException => {
                     if let Some(exception) = user_mode.context_mut().take_exception() {
@@ -253,32 +303,32 @@ impl Thread {
                                     raw_pf.addr,
                                     raw_pf.error_code,
                                 );
-                                if let Some(info) = info {
-                                    if let Err(err) = vmar.handle_page_fault(&info) {
+                                match info.and_then(|info| vmar.handle_page_fault(&info).err()) {
+                                    Some(err) => {
                                         ostd::error!(
                                             "Fatal user page fault at {:#x}: {:?}",
                                             raw_pf.addr,
                                             err
                                         );
                                         self.deliver_signal(Signal::SIGSEGV);
-                                        if self.inner.lock().state == ThreadState::Dead {
-                                            return;
-                                        }
                                     }
-                                } else {
-                                    ostd::error!("User fault outside user range: {:#x}", raw_pf.addr);
-                                    self.deliver_signal(Signal::SIGSEGV);
-                                    if self.inner.lock().state == ThreadState::Dead {
-                                        return;
+                                    None if info.is_none() => {
+                                        ostd::error!(
+                                            "User fault outside user range: {:#x}",
+                                            raw_pf.addr
+                                        );
+                                        self.deliver_signal(Signal::SIGSEGV);
                                     }
+                                    None => {}
                                 }
                             }
-                            _ => {
-                                ostd::error!("Unhandled user CPU exception: {:?}", exception);
+                            // TODO: map every exception to the signal POSIX
+                            // requires. This reports SIGILL for all of them, so a
+                            // divide-by-zero or a general-protection fault is
+                            // indistinguishable from a bad opcode.
+                            other => {
+                                ostd::error!("Unhandled user CPU exception: {:?}", other);
                                 self.deliver_signal(Signal::SIGILL);
-                                if self.inner.lock().state == ThreadState::Dead {
-                                    return;
-                                }
                             }
                         }
                     }
@@ -287,6 +337,17 @@ impl Thread {
                     // Preempted or kernel event occurred, loop back to check AST
                 }
             }
+
+            // A signal handled above may have run the default terminating action,
+            // which is what marks the thread dead.
+            if self.is_dead() {
+                return;
+            }
         }
+    }
+
+    /// Returns whether this thread has been terminated.
+    fn is_dead(&self) -> bool {
+        self.inner.lock().state == ThreadState::Dead
     }
 }

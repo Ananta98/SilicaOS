@@ -99,7 +99,7 @@ impl FbConsole {
         }
 
         let cell = self.cells[row * self.cols + col];
-        let (mut fg, mut bg) = if cell.inverse {
+        let (mut fg, bg) = if cell.inverse {
             (cell.bg, cell.fg)
         } else {
             (cell.fg, cell.bg)

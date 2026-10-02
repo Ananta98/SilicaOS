@@ -9,7 +9,7 @@ use alloc::vec;
 use ostd::{
     boot::boot_info,
     io::IoMem,
-    mm::{page_prop::CachePolicy, VmIo, VmIoOnce},
+    mm::{CachePolicy, VmIo, VmIoOnce},
 };
 
 use super::{

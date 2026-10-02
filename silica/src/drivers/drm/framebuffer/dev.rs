@@ -272,34 +272,39 @@ impl FbFixScreeninfo {
         buf[offset..offset + size_of::<usize>()].copy_from_slice(&ptr_bytes);
         offset += size_of::<usize>();
 
-        let mut put_u32 = |val: u32| {
-            buf[offset..offset + 4].copy_from_slice(&val.to_ne_bytes());
-            offset += 4;
-        };
+        buf[offset..offset + 4].copy_from_slice(&self.smem_len.to_ne_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&self.type_.to_ne_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&self.type_aux.to_ne_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&self.visual.to_ne_bytes());
+        offset += 4;
 
-        let mut put_u16 = |val: u16| {
-            buf[offset..offset + 2].copy_from_slice(&val.to_ne_bytes());
-            offset += 2;
-        };
+        buf[offset..offset + 2].copy_from_slice(&self.xpanstep.to_ne_bytes());
+        offset += 2;
+        buf[offset..offset + 2].copy_from_slice(&self.ypanstep.to_ne_bytes());
+        offset += 2;
+        buf[offset..offset + 2].copy_from_slice(&self.ywrapstep.to_ne_bytes());
+        offset += 2;
 
-        put_u32(self.smem_len);
-        put_u32(self.type_);
-        put_u32(self.type_aux);
-        put_u32(self.visual);
-        put_u16(self.xpanstep);
-        put_u16(self.ypanstep);
-        put_u16(self.ywrapstep);
-        put_u32(self.line_length);
+        buf[offset..offset + 4].copy_from_slice(&self.line_length.to_ne_bytes());
+        offset += 4;
 
         let mmio_ptr = self.mmio_start.to_ne_bytes();
         buf[offset..offset + size_of::<usize>()].copy_from_slice(&mmio_ptr);
         offset += size_of::<usize>();
 
-        put_u32(self.mmio_len);
-        put_u32(self.accel);
-        put_u16(self.capabilities);
-        put_u16(self.reserved[0]);
-        put_u16(self.reserved[1]);
+        buf[offset..offset + 4].copy_from_slice(&self.mmio_len.to_ne_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&self.accel.to_ne_bytes());
+        offset += 4;
+
+        buf[offset..offset + 2].copy_from_slice(&self.capabilities.to_ne_bytes());
+        offset += 2;
+        buf[offset..offset + 2].copy_from_slice(&self.reserved[0].to_ne_bytes());
+        offset += 2;
+        buf[offset..offset + 2].copy_from_slice(&self.reserved[1].to_ne_bytes());
 
         buf
     }

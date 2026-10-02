@@ -29,6 +29,17 @@ bitflags! {
         const FIXED_NOREPLACE = 0x0010_0000;
         /// `MAP_POPULATE`: fault the whole mapping in before returning.
         const POPULATE = 0x0000_8000;
+        /// `MAP_GROWSDOWN`: let a fault below the mapping extend it downwards.
+        ///
+        /// This is what a main stack is: one mapping at the top of the address
+        /// space that grows towards low addresses as the function nesting deepens,
+        /// instead of being resized by a system call. See
+        /// [`Vmar::handle_page_fault`](crate::vm::vmar::Vmar::handle_page_fault).
+        ///
+        /// It only ever applies to private anonymous memory. Linux accepts the
+        /// flag on a file mapping and then refuses to grow it, and this does the
+        /// same: the mapping records the request and the fault path declines.
+        const GROWSDOWN = 0x0000_0100;
     }
 }
 
@@ -45,7 +56,8 @@ impl MmapFlags {
         .union(Self::FIXED)
         .union(Self::ANONYMOUS)
         .union(Self::FIXED_NOREPLACE)
-        .union(Self::POPULATE);
+        .union(Self::POPULATE)
+        .union(Self::GROWSDOWN);
 
     /// Every bit this architecture assigns, which is what `from_raw` checks the
     /// argument against.
@@ -96,6 +108,11 @@ impl MmapFlags {
     /// Returns whether the mapping was requested as anonymous.
     pub fn is_anonymous(self) -> bool {
         self.contains(Self::ANONYMOUS)
+    }
+
+    /// Returns whether a fault just below the mapping should extend it downwards.
+    pub fn grows_down(self) -> bool {
+        self.contains(Self::GROWSDOWN)
     }
 }
 

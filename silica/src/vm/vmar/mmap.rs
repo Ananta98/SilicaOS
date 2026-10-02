@@ -5,11 +5,11 @@
 use alloc::sync::Arc;
 use core::num::NonZeroUsize;
 
-use ostd::mm::{PAGE_SIZE, Vaddr};
+use ostd::mm::{PAGE_SIZE, Vaddr, VmSpace};
 
 use crate::{
-    errno::Result,
-    vm::{backing::Backing, flags::MmapFlags, perms::VmPerms},
+    errno::{Errno, Result},
+    vm::{backing::Backing, flags::MmapFlags, perms::VmPerms, reclaim},
 };
 
 use super::{
@@ -172,7 +172,15 @@ impl Vmar {
         // contract, and a no-op for every other placement.
         inner.unmap_range(&self.vm_space, &range);
 
-        let mapping = VmMapping::new(start, size, perms, flags.is_shared(), backing, offset);
+        let mapping = VmMapping::new(
+            start,
+            size,
+            perms,
+            flags.is_shared(),
+            flags.grows_down(),
+            backing,
+            offset,
+        );
         inner.total_vm += len;
         inner.mappings.insert(mapping);
         drop(inner);
@@ -213,14 +221,43 @@ impl Vmar {
             let perms = mapping.perms().granted();
             let mut addr = wanted.start;
             while addr < wanted.end {
-                super::page_fault::handle_mapping_fault(
-                    &mapping,
-                    &self.vm_space,
-                    &PageFaultInfo::new(addr, perms),
-                )?;
+                match Self::fault_one_page(&mapping, &self.vm_space, addr, perms) {
+                    Ok(()) => {}
+                    Err(errno) => return Err(errno),
+                }
                 addr += PAGE_SIZE;
             }
         }
         Ok(())
+    }
+
+    /// Resolves one page fault, reclaiming and retrying once if the kernel has
+    /// run out of frames.
+    ///
+    /// This is the one place in the subsystem where reclaiming inline is safe,
+    /// and it is safe for a structural reason rather than an incidental one: the
+    /// records were copied out above and the address space lock is not held, so
+    /// a reclaim pass can take every address space's write lock, including this
+    /// one's. The fault path itself cannot do this — it holds this address
+    /// space's read lock across the allocation — which is why reclaim is not
+    /// wired into [`super::page_fault::handle_mapping_fault`].
+    ///
+    /// The retry happens once. A pass that releases nothing will not release
+    /// anything on the next one either, so retrying again would only turn an
+    /// `ENOMEM` into a wait.
+    fn fault_one_page(
+        mapping: &VmMapping,
+        vm_space: &VmSpace,
+        addr: Vaddr,
+        perms: VmPerms,
+    ) -> Result<()> {
+        let fault = || PageFaultInfo::new(addr, perms);
+        match super::page_fault::handle_mapping_fault(mapping, vm_space, &fault()) {
+            Err(Errno::ENOMEM) => {
+                reclaim::reclaim_at_least(1);
+                super::page_fault::handle_mapping_fault(mapping, vm_space, &fault())
+            }
+            result => result,
+        }
     }
 }

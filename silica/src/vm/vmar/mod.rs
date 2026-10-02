@@ -19,6 +19,7 @@ mod mremap;
 mod msync;
 mod munmap;
 pub mod page_fault;
+mod reclaim;
 
 use alloc::sync::Arc;
 use core::{
@@ -47,6 +48,20 @@ pub const VMAR_CAP_ADDR: Vaddr = MAX_USERSPACE_VADDR;
 /// The headroom left above all mappings for a process's main stack to grow
 /// into, including its guard page and random offset.
 const VMAR_STACK_RESERVE: usize = 2048 * PAGE_SIZE;
+
+/// How far below a downward-growing mapping a fault may be and still grow it.
+///
+/// This is the stack guard gap, and it is what tells a stack that has run out of
+/// room apart from a wild pointer. A program that recurses deeper faults on the
+/// page just below its stack and the mapping extends; a load or jump that lands
+/// further below than this lands in a gap rather than on a mapping, and is
+/// reported as a fault instead of quietly growing the mapping without bound.
+///
+/// It matches the Linux default of 256 pages. The gap is measured afresh from
+/// the mapping's current start on every fault, so a stack that grows one page at
+/// a time may grow as far as it likes; the bound is on how far a *single* fault
+/// may be from the mapping, not on how large the mapping may end up.
+const STACK_GUARD_GAP: usize = 256 * PAGE_SIZE;
 
 /// The exclusive upper bound used when `MAP_32BIT` is requested, which asks for
 /// an address below 2 GiB.
@@ -111,14 +126,18 @@ struct VmarInner {
 impl Vmar {
     /// Creates a new, empty address space.
     pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+        let vmar = Arc::new(Self {
             inner: RwLock::new(VmarInner {
                 mappings: Mappings::new(),
                 total_vm: 0,
             }),
             vm_space: Arc::new(VmSpace::new()),
             max_addr_space: AtomicUsize::new(0),
-        })
+        });
+        // Registered weakly, so this does not keep the address space alive and
+        // needs no matching deregistration when it is dropped.
+        crate::vm::reclaim::register(&vmar);
+        vmar
     }
 
     /// Returns the hardware page table backing this address space.
@@ -166,6 +185,30 @@ impl Vmar {
     /// Returns whether every page of `range` is mapped.
     pub fn is_fully_mapped(&self, range: &Range<Vaddr>) -> bool {
         self.inner.read().mappings.is_fully_mapped(range)
+    }
+
+    /// Returns the mapping covering `address`, growing a downward-growing one
+    /// downwards to reach it, for the fault path.
+    ///
+    /// This is the slow half of [`Vmar::handle_page_fault`]: the caller has
+    /// found that no record covers `address`, so the only way a fault on it is
+    /// legitimate rather than an error is that it fell just below a stack that
+    /// is allowed to grow. Returns the extended record, or `None` if the address
+    /// is not one that may be grown into.
+    ///
+    /// The set is read again under the write lock, because the caller has just
+    /// released a read lock that found nothing there: another context may have
+    /// grown the mapping, or faulted the page in, in between.
+    pub(super) fn grow_for_fault(&self, address: Vaddr) -> Option<VmMapping> {
+        let page = address & !(PAGE_SIZE - 1);
+
+        let mut inner = self.inner.write();
+        // Another context got there first, in which case this is an ordinary
+        // fault after all.
+        if let Some(mapping) = inner.mappings.get(address) {
+            return Some(mapping.dup());
+        }
+        inner.grow_downwards(self, page)
     }
 
     /// Releases every mapping and every page table entry.
@@ -287,6 +330,48 @@ impl VmarInner {
         })
     }
 
+    /// Extends the record above `page` downwards so that it covers `page`, and
+    /// returns it.
+    ///
+    /// `None` means the address cannot be grown into. Nothing above it, a
+    /// record that may not grow, a gap wider than [`STACK_GUARD_GAP`], or a
+    /// record already covering `page` all land here, and the caller reports the
+    /// fault to the process.
+    fn grow_downwards(&mut self, vmar: &Vmar, page: Vaddr) -> Option<VmMapping> {
+        // The mapping may not reach below the floor of the user address space,
+        // however recently it was created. This is the same bound `mmap` applies,
+        // and it is what stops a stack near the bottom from growing into the
+        // region that stays unmapped on purpose.
+        if page < VMAR_LOWEST_ADDR {
+            return None;
+        }
+        // The record that would have to grow is the first one starting at or
+        // after `page`. Since the caller found no record covering `page`, and
+        // records never overlap, nothing lies between the two.
+        let above = self.mappings.next(page)?;
+        let gap = above.start() - page;
+        if gap > STACK_GUARD_GAP {
+            return None;
+        }
+        // Growth maps more address space, so it is subject to the address space
+        // limit exactly as an `mmap` of the same size would be. A process already
+        // at its `RLIMIT_AS` gets a fault here rather than a stack that outgrows
+        // its limit, which is what Linux does.
+        //
+        // The `Errno` is deliberately dropped rather than reported: the caller
+        // reports one failure for a fault it cannot resolve, and `EACCES` is what
+        // a caller of the fault path already expects. Which limit was hit does not
+        // change what happens next.
+        if self.check_fits_addr_space(vmar, gap).is_err() {
+            return None;
+        }
+        let grown = self.mappings.grow_downwards(page)?;
+        // The mapping covers more address space, so the total it contributes to
+        // the address space limit goes up by the gap that was just added.
+        self.total_vm += gap;
+        Some(grown)
+    }
+
     /// Returns a free region of `size` bytes below `high_limit`, searching from
     /// high addresses to low ones.
     ///
@@ -397,6 +482,7 @@ mod tests {
             at_high,
             NonZeroUsize::new(PAGE_SIZE).unwrap(),
             VmPerms::READ.with_ceiling(),
+            false,
             false,
             None::<Arc<dyn Backing>>,
             0,

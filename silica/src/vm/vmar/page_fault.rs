@@ -7,6 +7,10 @@
 //! and then either admits that another context already installed the page or
 //! installs it: from the mapping's backing object, or as a fresh zeroed page for
 //! private anonymous memory.
+//!
+//! One address needs no mapping: a fault just below a `MAP_GROWSDOWN` mapping is
+//! what a stack running out of room looks like, and the mapping is extended to
+//! cover it. See [`Vmar::handle_page_fault`].
 
 use ostd::mm::{
     PAGE_SIZE, PageFlags, UFrame, Vaddr, VmSpace, io::util::HasVmReaderWriter, tlb::TlbFlushOp,
@@ -122,16 +126,37 @@ impl Vmar {
     /// Returns [`crate::errno::Errno::EACCES`] when no mapping covers the
     /// address, which the caller reports to the faulting process as a fault
     /// signal.
+    ///
+    /// # A fault below the mappings
+    ///
+    /// An address that no mapping covers is nearly always a genuine error, and
+    /// that is what the [`EACCES`](crate::errno::Errno::EACCES) below reports.
+    /// The exception is a fault on the page just below a stack that has run out
+    /// of room: a mapping created with `MAP_GROWSDOWN` is extended to cover it,
+    /// which is what lets an ordinary function call push a frame without a
+    /// system call to resize anything.
+    ///
+    /// Growth is bounded twice over. Only private anonymous mappings take part,
+    /// and only a fault within [`STACK_GUARD_GAP`](super::STACK_GUARD_GAP) of
+    /// the mapping's start is allowed to extend it, so a wild pointer below the
+    /// stack faults instead of growing the mapping without limit.
     pub fn handle_page_fault(&self, info: &PageFaultInfo) -> Result<()> {
-        let inner = self.inner.read();
-        let Some(mapping) = inner.mappings.get(info.address) else {
+        // The usual case, under the cheaper lock.
+        {
+            let inner = self.inner.read();
+            if let Some(mapping) = inner.mappings.get(info.address) {
+                return handle_mapping_fault(mapping, &self.vm_space, info);
+            }
+        }
+
+        let Some(mapping) = self.grow_for_fault(info.address) else {
             crate::return_errno!(
                 EACCES,
                 "no mapping contains the faulting address {:#x}",
                 info.address
             );
         };
-        handle_mapping_fault(mapping, &self.vm_space, info)
+        handle_mapping_fault(&mapping, &self.vm_space, info)
     }
 }
 
@@ -240,4 +265,208 @@ fn copy_frame(frame: &UFrame) -> Result<UFrame> {
     let copy = alloc_zeroed_frame()?;
     copy.writer().write(&mut frame.reader());
     Ok(copy)
+}
+
+#[cfg(ktest)]
+mod tests {
+    use ostd::mm::{PAGE_SIZE, Vaddr};
+    use ostd::prelude::ktest;
+
+    use super::*;
+    use crate::vm::{
+        flags::MmapFlags,
+        perms::VmPerms,
+        tests::{not_resident, paddr_at, record_at, touch},
+    };
+    use crate::vm::vmar::{STACK_GUARD_GAP, VMAR_LOWEST_ADDR};
+
+    /// Somewhere high enough to be well clear of anything `mmap` hands out,
+    /// and low enough to leave room for the stack to grow below itself.
+    const STACK_TOP: Vaddr = 0x4000_0000;
+
+    /// Maps a two-page private anonymous stack at `STACK_TOP`.
+    fn growdown_stack(vmar: &Vmar, flags: MmapFlags) -> Vaddr {
+        vmar.mmap_anonymous(
+            STACK_TOP,
+            2 * PAGE_SIZE,
+            VmPerms::READ | VmPerms::WRITE,
+            flags,
+        )
+        .expect("the stack mapping is created at the requested address")
+    }
+
+    /// Takes a write fault at `addr`, which a real access would.
+    fn fault(vmar: &Vmar, addr: Vaddr) -> Result<()> {
+        vmar.handle_page_fault(&PageFaultInfo::new(addr, VmPerms::WRITE))
+    }
+
+    #[ktest]
+    fn a_fault_below_a_growdown_mapping_extends_it() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+        assert_eq!(start, STACK_TOP);
+        assert_eq!(vmar.total_mapped_size(), 2 * PAGE_SIZE);
+
+        // The page just below the mapping, which is what a call pushing a frame
+        // looks like.
+        let below = start - PAGE_SIZE;
+        fault(&vmar, below).expect("a stack with room grows downwards");
+
+        let grown = record_at(&vmar, below);
+        assert_eq!(grown.start(), below, "the record now reaches the faulting page");
+        assert_eq!(grown.len(), 3 * PAGE_SIZE);
+        assert_eq!(
+            vmar.total_mapped_size(),
+            3 * PAGE_SIZE,
+            "the address space grew by the page that was added"
+        );
+    }
+
+    #[ktest]
+    fn growth_faults_the_page_in_and_it_reads_as_zero() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+
+        let below = start - PAGE_SIZE;
+        assert!(not_resident(&vmar, below), "the page is not in the page table yet");
+        fault(&vmar, below).expect("the stack grows");
+        assert!(!not_resident(&vmar, below), "the faulting page is now resident");
+
+        // Growing only makes the page addressable; it must not invent contents.
+        touch(&vmar, below..below + PAGE_SIZE).expect("the grown page faults in");
+        assert_eq!(crate::vm::tests::peek(&vmar, below), 0);
+    }
+
+    #[ktest]
+    fn growth_reaches_several_pages_down_at_once() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+
+        // Well inside the guard gap, so this is a deep stack rather than a wild
+        // pointer.
+        let target = start - 16 * PAGE_SIZE;
+        fault(&vmar, target).expect("the stack grows to reach the page");
+
+        assert_eq!(record_at(&vmar, target).start(), target);
+        assert_eq!(vmar.total_mapped_size(), 18 * PAGE_SIZE);
+        // Only the page that faulted is resident: growth maps, it does not fill.
+        assert!(not_resident(&vmar, target + 8 * PAGE_SIZE));
+    }
+
+    #[ktest]
+    fn a_fault_past_the_guard_gap_is_refused() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+
+        // One page beyond the guard gap. This is a wild pointer below the stack,
+        // not a stack running out of room, and growing for it would let any bad
+        // address quietly become a mapping.
+        let wild = start - (STACK_GUARD_GAP + PAGE_SIZE);
+        assert!(
+            fault(&vmar, wild).is_err(),
+            "a fault beyond the guard gap must not grow the mapping"
+        );
+        assert_eq!(
+            vmar.total_mapped_size(),
+            2 * PAGE_SIZE,
+            "the mapping is left exactly as it was"
+        );
+    }
+
+    #[ktest]
+    fn a_fault_at_the_guard_gap_edge_still_grows() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+
+        // The last address growth is allowed to reach.
+        let edge = start - STACK_GUARD_GAP;
+        fault(&vmar, edge).expect("the guard gap is an inclusive bound");
+        assert_eq!(record_at(&vmar, edge).start(), edge);
+    }
+
+    #[ktest]
+    fn growth_stops_at_the_bottom_of_the_address_space() {
+        let vmar = Vmar::new();
+        // A stack sitting just above the floor, so the floor itself is the
+        // furthest down it can ever grow.
+        let start = vmar
+            .mmap_anonymous(
+                VMAR_LOWEST_ADDR + 2 * PAGE_SIZE,
+                PAGE_SIZE,
+                VmPerms::READ | VmPerms::WRITE,
+                MmapFlags::PRIVATE | MmapFlags::GROWSDOWN,
+            )
+            .expect("the stack mapping is created");
+
+        let at_floor = VMAR_LOWEST_ADDR;
+        fault(&vmar, at_floor).expect("the floor is still user space");
+        assert_eq!(record_at(&vmar, at_floor).start(), at_floor);
+        assert_eq!(start, VMAR_LOWEST_ADDR + 2 * PAGE_SIZE);
+    }
+
+    #[ktest]
+    fn a_mapping_without_grows_down_does_not_grow() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE);
+
+        let below = start - PAGE_SIZE;
+        assert!(
+            fault(&vmar, below).is_err(),
+            "an ordinary mapping does not extend itself"
+        );
+        assert_eq!(vmar.total_mapped_size(), 2 * PAGE_SIZE);
+    }
+
+    #[ktest]
+    fn a_shared_growdown_mapping_does_not_grow() {
+        let vmar = Vmar::new();
+        // A file-backed mapping may carry the flag on Linux and still never grow,
+        // because dropping the mapping would lose the file's contents. What stands
+        // in for a file here is a shared object: its pages are owned by the
+        // object, so the mapping is not this address space's to extend either.
+        let start = growdown_stack(&vmar, MmapFlags::SHARED | MmapFlags::GROWSDOWN);
+
+        let below = start - PAGE_SIZE;
+        assert!(
+            fault(&vmar, below).is_err(),
+            "a shared mapping does not extend itself"
+        );
+        assert_eq!(vmar.total_mapped_size(), 2 * PAGE_SIZE);
+    }
+
+    #[ktest]
+    fn growth_respects_the_address_space_limit() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+        // Exactly enough for the mapping and nothing more, so any growth at all
+        // exceeds the limit.
+        vmar.set_max_addr_space(Some(2 * PAGE_SIZE));
+
+        let below = start - PAGE_SIZE;
+        assert!(
+            fault(&vmar, below).is_err(),
+            "growth is subject to the address space limit"
+        );
+        assert_eq!(vmar.total_mapped_size(), 2 * PAGE_SIZE);
+    }
+
+    #[ktest]
+    fn a_grown_page_is_its_own() {
+        let vmar = Vmar::new();
+        let start = growdown_stack(&vmar, MmapFlags::PRIVATE | MmapFlags::GROWSDOWN);
+
+        // Write to the original stack, then grow and check the new page did not
+        // inherit it: growth extends a mapping, it does not copy anything.
+        let on_stack = start + PAGE_SIZE;
+        crate::vm::tests::poke(&vmar, on_stack, 0x5eed_5eed);
+        let below = start - PAGE_SIZE;
+        fault(&vmar, below).expect("the stack grows");
+
+        assert_ne!(
+            paddr_at(&vmar, below),
+            paddr_at(&vmar, on_stack),
+            "the new page is a fresh frame"
+        );
+        assert_eq!(crate::vm::tests::peek(&vmar, on_stack), 0x5eed_5eed);
+    }
 }

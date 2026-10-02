@@ -44,6 +44,14 @@ pub struct VmMapping {
     /// Whether writes are carried through to the backing object and are visible
     /// to every other mapping of it.
     shared: bool,
+    /// Whether a fault below this mapping extends it downwards.
+    ///
+    /// This is `MAP_GROWSDOWN`, and it is what a main stack is: one mapping
+    /// created at the top of the address space that grows towards low addresses
+    /// as the function nesting deepens, rather than being resized by a system
+    /// call. The request alone does not make growth possible — see
+    /// [`Self::is_growable`].
+    grows_down: bool,
     /// The object supplying the pages, or `None` for `MAP_PRIVATE` anonymous
     /// memory, where every fault gets a fresh zeroed page.
     backing: Option<Arc<dyn Backing>>,
@@ -61,6 +69,7 @@ impl VmMapping {
         len: NonZeroUsize,
         perms: VmPerms,
         shared: bool,
+        grows_down: bool,
         backing: Option<Arc<dyn Backing>>,
         backing_offset: usize,
     ) -> Self {
@@ -72,6 +81,7 @@ impl VmMapping {
             len,
             perms,
             shared,
+            grows_down,
             backing,
             backing_offset,
         }
@@ -116,6 +126,24 @@ impl VmMapping {
         self.shared
     }
 
+    /// Returns whether this mapping asked to grow downwards.
+    pub fn grows_down(&self) -> bool {
+        self.grows_down
+    }
+
+    /// Returns whether a fault below this mapping may extend it.
+    ///
+    /// `MAP_GROWSDOWN` is the request; this is whether the kernel will honour
+    /// it. Only private anonymous memory qualifies, and this is where Linux
+    /// agrees: a file-backed mapping may carry the flag and still never grow,
+    /// because dropping the mapping would lose the file's contents rather than
+    /// re-reading them. Private anonymous memory instead faults in a fresh
+    /// zeroed page, so extending the mapping downwards is invisible to the
+    /// program beyond the pages becoming addressable.
+    pub(super) fn is_growable(&self) -> bool {
+        self.grows_down && !self.shared && self.backing.is_none()
+    }
+
     /// Returns the object supplying the pages, if any.
     pub fn backing(&self) -> Option<&Arc<dyn Backing>> {
         self.backing.as_ref()
@@ -152,6 +180,21 @@ impl VmMapping {
         !self.shared
     }
 
+    /// Returns whether the pages this mapping installs are ones the reclaim pass
+    /// may drop again.
+    ///
+    /// Only private anonymous memory qualifies, and only because both of the
+    /// conditions reclaim needs hold at once: the page is referenced by nothing
+    /// but its page table entry, and until something writes to it the page holds
+    /// nothing but the zeroes a re-fault would produce anyway.
+    ///
+    /// A mapping with a backing object is excluded whatever its flags, because
+    /// those pages are the object's rather than the page table's. The reasoning
+    /// is in `vmar::reclaim`, which is where a page's ownership is decided.
+    pub(super) fn is_reclaimable(&self) -> bool {
+        !self.shared && self.backing.is_none()
+    }
+
     /// Returns the page table flags that this mapping's permissions imply.
     pub fn page_flags(&self) -> PageFlags {
         PageFlags::from(self.perms)
@@ -161,6 +204,25 @@ impl VmMapping {
     pub(super) fn enlarge(self, extra: usize) -> Self {
         debug_assert!(extra.is_multiple_of(PAGE_SIZE));
         Self {
+            len: NonZeroUsize::new(self.len.get() + extra).expect("a mapping is never empty"),
+            ..self
+        }
+    }
+
+    /// Lowers the start of the record to `page`, which must be page-aligned and
+    /// strictly below the current start.
+    ///
+    /// This is how a growing stack grows: the record reaches down far enough to
+    /// cover the page that faulted. Nothing is faulted in here. The pages
+    /// between `page` and the old start become *mapped but not resident*, and
+    /// the fault that led here installs the one it needs.
+    pub(super) fn extend_downwards(self, page: Vaddr) -> Self {
+        debug_assert!(page.is_multiple_of(PAGE_SIZE));
+        debug_assert!(page < self.start);
+        let extra = self.start - page;
+        debug_assert!(extra.is_multiple_of(PAGE_SIZE));
+        Self {
+            start: page,
             len: NonZeroUsize::new(self.len.get() + extra).expect("a mapping is never empty"),
             ..self
         }
@@ -191,6 +253,7 @@ impl VmMapping {
             len: self.len,
             perms: self.perms,
             shared: self.shared,
+            grows_down: self.grows_down,
             backing: self.backing.clone(),
             backing_offset: self.backing_offset,
         }
@@ -206,6 +269,7 @@ impl VmMapping {
             len,
             perms,
             shared,
+            grows_down,
             backing,
             backing_offset,
         } = self;
@@ -216,6 +280,7 @@ impl VmMapping {
             len: NonZeroUsize::new(left_len).expect("split leaves a non-empty side"),
             perms,
             shared,
+            grows_down,
             backing: backing.clone(),
             backing_offset,
         };
@@ -224,6 +289,7 @@ impl VmMapping {
             len: NonZeroUsize::new(len.get() - left_len).expect("split leaves a non-empty side"),
             perms,
             shared,
+            grows_down,
             backing,
             backing_offset: backing_offset + left_len,
         };
@@ -268,6 +334,7 @@ impl VmMapping {
     pub(super) fn can_merge(left: &Self, right: &Self) -> bool {
         left.end() == right.start
             && left.shared == right.shared
+            && left.grows_down == right.grows_down
             && left.perms == right.perms
             && match (&left.backing, &right.backing) {
                 (None, None) => true,
@@ -289,6 +356,7 @@ impl VmMapping {
             len: NonZeroUsize::new(left.len() + right.len()).expect("both sides are non-empty"),
             perms: left.perms,
             shared: left.shared,
+            grows_down: left.grows_down,
             backing: left.backing.clone(),
             backing_offset: left.backing_offset,
         }
@@ -327,7 +395,10 @@ impl VmMapping {
 
         while cursor.virt_addr() < range.end {
             let remaining = range.end - cursor.virt_addr();
-            match cursor.protect_next(remaining, |flags, _| *flags = new_flags) {
+            match cursor.protect_next(remaining, |flags, _| {
+                let preserve = *flags & (PageFlags::DIRTY | PageFlags::ACCESSED);
+                *flags = new_flags | preserve;
+            }) {
                 Some(protected) => cursor
                     .flusher()
                     .issue_tlb_flush(TlbFlushOp::for_range(protected)),
@@ -358,6 +429,7 @@ impl core::fmt::Debug for VmMapping {
             .field("range", &self.range())
             .field("perms", &self.perms)
             .field("shared", &self.shared)
+            .field("grows_down", &self.grows_down)
             .field("backing_offset", &self.backing_offset)
             .field("backing", &self.backing)
             .finish()
@@ -502,6 +574,34 @@ impl Mappings {
     /// Removes the record starting at `start`.
     pub(super) fn remove(&mut self, start: Vaddr) -> Option<VmMapping> {
         self.map.remove(&start)
+    }
+
+    /// Extends the record that begins at or above `page` downwards so that it
+    /// covers `page`, and returns the extended record.
+    ///
+    /// Returns `None` when the address cannot be grown into: when nothing lies
+    /// above it, when what lies above it is not allowed to grow — see
+    /// [`VmMapping::is_growable`] — or when a record already starts at `page`.
+    ///
+    /// The record has to be re-inserted under its new start address, which
+    /// [`Self::insert`] then merges with the neighbours it is now adjacent to.
+    /// That is the same bookkeeping as any other mutation, so the set's
+    /// invariants do not need anything extra here.
+    ///
+    /// The caller must have established that no record covers `page` and that
+    /// `[page, above)` is clear, which is what rules out an overlap here. The
+    /// record's pages are not touched: the new low pages are mapped but not
+    /// resident, and the fault that led here installs the one it needs.
+    pub(super) fn grow_downwards(&mut self, page: Vaddr) -> Option<VmMapping> {
+        let above = self.next(page)?;
+        if above.start() <= page || !above.is_growable() {
+            return None;
+        }
+
+        let record = self.remove(above.start())?;
+        self.insert(record.extend_downwards(page));
+
+        self.get(page).map(VmMapping::dup)
     }
 
     /// Removes every record.

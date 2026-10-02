@@ -31,6 +31,7 @@
 pub mod backing;
 pub mod flags;
 pub mod perms;
+pub mod reclaim;
 pub mod shm;
 pub mod vmar;
 

@@ -81,11 +81,51 @@ pub enum Errno {
     ELOOP = 40,
     /// Value too large for defined data type.
     EOVERFLOW = 75,
+    /// Socket operation on non-socket.
+    ENOTSOCK = 88,
+    /// Destination address required.
+    EDESTADDRREQ = 89,
+    /// Message too long.
+    EMSGSIZE = 90,
+    /// Protocol wrong type for socket.
+    EPROTOTYPE = 91,
+    /// Protocol not available.
+    ENOPROTOOPT = 92,
+    /// Protocol not supported.
+    EPROTONOSUPPORT = 93,
+    /// Socket type not supported.
+    ESOCKTNOSUPPORT = 94,
     /// Operation not supported.
     ENOTSUP = 95,
+    /// Address family not supported by protocol.
+    EAFNOSUPPORT = 97,
+    /// Address already in use.
+    EADDRINUSE = 98,
+    /// Cannot assign requested address.
+    EADDRNOTAVAIL = 99,
+    /// Network is down.
+    ENETDOWN = 100,
+    /// Network is unreachable.
+    ENETUNREACH = 101,
+    /// Connection reset by peer.
+    ECONNRESET = 104,
+    /// No buffer space available.
+    ENOBUFS = 105,
+    /// Transport endpoint is already connected.
+    EISCONN = 106,
+    /// Transport endpoint is not connected.
+    ENOTCONN = 107,
+    /// Connection timed out.
+    ETIMEDOUT = 110,
+    /// Connection refused.
+    ECONNREFUSED = 111,
 }
 
 impl Errno {
+    /// Operation not supported on transport endpoint (alias for ENOTSUP).
+    pub const EOPNOTSUPP: Errno = Errno::ENOTSUP;
+    /// Resource temporarily unavailable (alias for EAGAIN).
+    pub const EWOULDBLOCK: Errno = Errno::EAGAIN;
     /// Returns the value user space observes for a *successful* syscall.
     ///
     /// This is the bare POSIX number. It is what [`Errno::description`] style
@@ -141,6 +181,24 @@ impl Errno {
             Self::ELOOP => "ELOOP",
             Self::EOVERFLOW => "EOVERFLOW",
             Self::ENOTSUP => "ENOTSUP",
+            Self::ENOTSOCK => "ENOTSOCK",
+            Self::EDESTADDRREQ => "EDESTADDRREQ",
+            Self::EMSGSIZE => "EMSGSIZE",
+            Self::EPROTOTYPE => "EPROTOTYPE",
+            Self::ENOPROTOOPT => "ENOPROTOOPT",
+            Self::EPROTONOSUPPORT => "EPROTONOSUPPORT",
+            Self::ESOCKTNOSUPPORT => "ESOCKTNOSUPPORT",
+            Self::EAFNOSUPPORT => "EAFNOSUPPORT",
+            Self::EADDRINUSE => "EADDRINUSE",
+            Self::EADDRNOTAVAIL => "EADDRNOTAVAIL",
+            Self::ENETDOWN => "ENETDOWN",
+            Self::ENETUNREACH => "ENETUNREACH",
+            Self::ECONNRESET => "ECONNRESET",
+            Self::ENOBUFS => "ENOBUFS",
+            Self::EISCONN => "EISCONN",
+            Self::ENOTCONN => "ENOTCONN",
+            Self::ETIMEDOUT => "ETIMEDOUT",
+            Self::ECONNREFUSED => "ECONNREFUSED",
         }
     }
 
@@ -180,6 +238,24 @@ impl Errno {
             Self::ELOOP => "too many levels of symbolic links",
             Self::EOVERFLOW => "value too large for defined data type",
             Self::ENOTSUP => "operation not supported",
+            Self::ENOTSOCK => "socket operation on non-socket",
+            Self::EDESTADDRREQ => "destination address required",
+            Self::EMSGSIZE => "message too long",
+            Self::EPROTOTYPE => "protocol wrong type for socket",
+            Self::ENOPROTOOPT => "protocol not available",
+            Self::EPROTONOSUPPORT => "protocol not supported",
+            Self::ESOCKTNOSUPPORT => "socket type not supported",
+            Self::EAFNOSUPPORT => "address family not supported by protocol",
+            Self::EADDRINUSE => "address already in use",
+            Self::EADDRNOTAVAIL => "cannot assign requested address",
+            Self::ENETDOWN => "network is down",
+            Self::ENETUNREACH => "network is unreachable",
+            Self::ECONNRESET => "connection reset by peer",
+            Self::ENOBUFS => "no buffer space available",
+            Self::EISCONN => "transport endpoint is already connected",
+            Self::ENOTCONN => "transport endpoint is not connected",
+            Self::ETIMEDOUT => "connection timed out",
+            Self::ECONNREFUSED => "connection refused",
         }
     }
 }

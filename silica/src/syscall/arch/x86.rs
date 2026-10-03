@@ -2,7 +2,7 @@
 
 //! System call dispatch for x86_64 architecture matching Linux syscall ABI numbers.
 
-use crate::syscall::{fs, mm, proc, sched};
+use crate::syscall::{fs, mm, net, proc, sched};
 
 crate::impl_syscall_nums_and_dispatch_fn! {
     SYS_READ = 0 => fs::sys_read(i32, usize, usize);
@@ -15,6 +15,18 @@ crate::impl_syscall_nums_and_dispatch_fn! {
     SYS_RT_SIGPROCMASK = 14 => proc::sys_rt_sigprocmask(i32, usize, usize, usize);
     SYS_SCHED_YIELD = 24 => sched::sys_sched_yield();
     SYS_GETPID = 39 => proc::sys_getpid();
+    SYS_SOCKET = 41 => net::sys_socket(i32, i32, i32);
+    SYS_CONNECT = 42 => net::sys_connect(i32, usize, u32);
+    SYS_ACCEPT = 43 => net::sys_accept(i32, usize, usize);
+    SYS_SENDTO = 44 => net::sys_sendto(i32, usize, usize, i32, usize, u32);
+    SYS_RECVFROM = 45 => net::sys_recvfrom(i32, usize, usize, i32, usize, usize);
+    SYS_SHUTDOWN = 48 => net::sys_shutdown(i32, i32);
+    SYS_BIND = 49 => net::sys_bind(i32, usize, u32);
+    SYS_LISTEN = 50 => net::sys_listen(i32, i32);
+    SYS_GETSOCKNAME = 51 => net::sys_getsockname(i32, usize, usize);
+    SYS_GETPEERNAME = 52 => net::sys_getpeername(i32, usize, usize);
+    SYS_SETSOCKOPT = 54 => net::sys_setsockopt(i32, i32, i32, usize, u32);
+    SYS_GETSOCKOPT = 55 => net::sys_getsockopt(i32, i32, i32, usize, usize);
     SYS_FORK = 57 => proc::sys_fork();
     SYS_KILL = 62 => proc::sys_kill(i32, i32);
     SYS_EXIT = 60 => proc::sys_exit(i32);

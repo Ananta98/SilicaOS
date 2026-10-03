@@ -6,9 +6,9 @@ use super::{
     address::PciAddress,
     bar::PciBar,
     config::{
-        PCI_COMMAND, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY_SPACE,
-        pci_read_config_u16, pci_read_config_u32, pci_read_config_u8,
-        pci_write_config_u16, pci_write_config_u32, pci_write_config_u8,
+        PCI_COMMAND, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_MEMORY_SPACE, pci_read_config_u8,
+        pci_read_config_u16, pci_read_config_u32, pci_write_config_u8, pci_write_config_u16,
+        pci_write_config_u32,
     },
     ids,
 };
@@ -78,4 +78,14 @@ impl PciDevice {
             && self.subclass == ids::mass_storage::NON_VOLATILE_MEMORY
             && self.prog_if == ids::mass_storage::nvm::NVME
     }
+
+    /// Returns `true` if this device is an Intel e1000/e1000e network controller.
+    pub fn is_e1000(&self) -> bool {
+        self.vendor_id == 0x8086
+            && matches!(
+                self.device_id,
+                0x100e | 0x1004 | 0x100f | 0x1010 | 0x1019 | 0x101a | 0x107c | 0x10d3 | 0x153a | 0x1502
+            )
+    }
 }
+

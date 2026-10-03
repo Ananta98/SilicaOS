@@ -41,6 +41,7 @@ pub mod cmdline;
 pub mod drivers;
 pub mod fs;
 pub mod modules;
+pub mod net;
 pub mod proc;
 pub mod sched;
 pub mod syscall;

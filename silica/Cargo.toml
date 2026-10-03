@@ -14,3 +14,17 @@ version = "2"
 
 [dependencies.spin]
 version = "0.9.8"
+
+[dependencies.smoltcp]
+version = "0.12"
+default-features = false
+features = [
+    "alloc",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-ipv6",
+    "socket-raw",
+    "socket-icmp",
+    "socket-udp",
+    "socket-tcp",
+]

@@ -21,6 +21,17 @@ pub mod class {
     pub const SATELLITE: u8 = 0x0F;
     pub const CRYPTO: u8 = 0x10;
     pub const SIGNAL_PROCESSING: u8 = 0x11;
+
+    pub mod network {
+        pub const ETHERNET: u8 = 0x00;
+        pub const TOKEN_RING: u8 = 0x01;
+        pub const FDDI: u8 = 0x02;
+        pub const ATM: u8 = 0x03;
+        pub const ISDN: u8 = 0x04;
+        pub const WORLDFIP: u8 = 0x05;
+        pub const PICMG: u8 = 0x06;
+        pub const OTHER: u8 = 0x80;
+    }
 }
 
 pub mod mass_storage {
@@ -52,4 +63,3 @@ pub mod bridge {
     pub const CARDBUS: u8 = 0x06;
     pub const OTHER: u8 = 0x80;
 }
-

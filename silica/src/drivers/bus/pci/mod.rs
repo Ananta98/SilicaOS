@@ -23,12 +23,12 @@ use spin::Mutex;
 pub use address::PciAddress;
 pub use bar::{BarType, PciBar, probe_bar};
 pub use config::{
-    PCI_BAR0, PCI_CLASS_CODE, PCI_COMMAND, PCI_COMMAND_BUS_MASTER,
-    PCI_COMMAND_INTX_DISABLE, PCI_COMMAND_IO_SPACE, PCI_COMMAND_MEMORY_SPACE,
-    PCI_CONFIG_ADDRESS_PORT, PCI_CONFIG_DATA_PORT, PCI_DEVICE_ID, PCI_HEADER_TYPE,
-    PCI_INTERRUPT_LINE, PCI_INTERRUPT_PIN, PCI_PROG_IF, PCI_REVISION_ID, PCI_STATUS,
-    PCI_SUBCLASS, PCI_VENDOR_ID, pci_read_config_u16, pci_read_config_u32,
-    pci_read_config_u8, pci_write_config_u16, pci_write_config_u32, pci_write_config_u8,
+    PCI_BAR0, PCI_CLASS_CODE, PCI_COMMAND, PCI_COMMAND_BUS_MASTER, PCI_COMMAND_INTX_DISABLE,
+    PCI_COMMAND_IO_SPACE, PCI_COMMAND_MEMORY_SPACE, PCI_CONFIG_ADDRESS_PORT, PCI_CONFIG_DATA_PORT,
+    PCI_DEVICE_ID, PCI_HEADER_TYPE, PCI_INTERRUPT_LINE, PCI_INTERRUPT_PIN, PCI_PROG_IF,
+    PCI_REVISION_ID, PCI_STATUS, PCI_SUBCLASS, PCI_VENDOR_ID, pci_read_config_u8,
+    pci_read_config_u16, pci_read_config_u32, pci_write_config_u8, pci_write_config_u16,
+    pci_write_config_u32,
 };
 pub use device::PciDevice;
 pub use scan::scan_bus;
@@ -53,7 +53,11 @@ pub fn init() -> Result<()> {
             dev.class_code,
             dev.subclass,
             dev.prog_if,
-            if dev.is_nvme() { "NVMe Controller" } else { "Generic Device" }
+            if dev.is_nvme() {
+                "NVMe Controller"
+            } else {
+                "Generic Device"
+            }
         );
 
         for bar in dev.bars.iter().flatten() {
@@ -80,3 +84,14 @@ pub fn get_devices() -> Vec<PciDevice> {
 pub fn find_nvme_device() -> Option<PciDevice> {
     PCI_DEVICES.lock().iter().find(|d| d.is_nvme()).cloned()
 }
+
+/// Find all Intel e1000 network devices on the PCI bus.
+pub fn find_e1000_devices() -> Vec<PciDevice> {
+    PCI_DEVICES.lock().iter().filter(|d| d.is_e1000()).cloned().collect()
+}
+
+/// Find the first Intel e1000 network device on the PCI bus, if present.
+pub fn find_e1000_device() -> Option<PciDevice> {
+    PCI_DEVICES.lock().iter().find(|d| d.is_e1000()).cloned()
+}
+

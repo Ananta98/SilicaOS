@@ -9,10 +9,13 @@ pub mod block;
 pub mod bus;
 pub mod char;
 pub mod drm;
+pub mod net;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::fmt;
 use spin::Mutex;
+
+pub use net::NetDevice;
 
 use crate::{api::errno::Result, drivers::bus::pci::PciDevice};
 
@@ -22,6 +25,7 @@ use crate::{api::errno::Result, drivers::bus::pci::PciDevice};
 
 pub static CHAR_DEVICES: Mutex<Vec<Arc<dyn CharacterDevice>>> = Mutex::new(Vec::new());
 pub static BLK_DEVICES: Mutex<Vec<Arc<dyn BlockDevice>>> = Mutex::new(Vec::new());
+pub static NET_DEVICES: Mutex<Vec<Arc<dyn NetDevice>>> = Mutex::new(Vec::new());
 
 /// Base Device Trait
 pub trait Device: Send + Sync {
@@ -125,6 +129,18 @@ pub fn register_blkdev(device: Arc<dyn BlockDevice>) {
     reg.push(device);
 }
 
+/// Register a Network Device in the global registry.
+pub fn register_netdev(device: Arc<dyn NetDevice>) {
+    let mut reg = NET_DEVICES.lock();
+    reg.push(device);
+}
+
+/// Unregister a Network Device by name.
+pub fn unregister_netdev(name: &str) {
+    let mut reg = NET_DEVICES.lock();
+    reg.retain(|d| d.name() != name);
+}
+
 /// Returns a snapshot list of all registered Character Devices.
 pub fn get_chrdevs() -> Vec<Arc<dyn CharacterDevice>> {
     let reg = CHAR_DEVICES.lock();
@@ -134,6 +150,12 @@ pub fn get_chrdevs() -> Vec<Arc<dyn CharacterDevice>> {
 /// Returns a snapshot list of all registered Block Devices.
 pub fn get_blkdevs() -> Vec<Arc<dyn BlockDevice>> {
     let reg = BLK_DEVICES.lock();
+    reg.clone()
+}
+
+/// Returns a snapshot list of all registered Network Devices.
+pub fn get_netdevs() -> Vec<Arc<dyn NetDevice>> {
+    let reg = NET_DEVICES.lock();
     reg.clone()
 }
 

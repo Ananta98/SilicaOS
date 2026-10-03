@@ -95,6 +95,11 @@ pub trait FileOps: Send + Sync {
     fn fault_in(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         self.read(offset, buf)
     }
+
+    /// Return the underlying network socket if this file represents a socket.
+    fn as_socket(&self) -> Option<Arc<crate::net::socket::KernelSocket>> {
+        None
+    }
 }
 
 /// The kernel representation of an open file description.
@@ -209,5 +214,10 @@ impl File {
             return Err(Errno::EACCES);
         }
         self.ops.mmap(offset, len)
+    }
+
+    /// Return the underlying network socket if this file represents a socket.
+    pub fn as_socket(&self) -> Option<Arc<crate::net::socket::KernelSocket>> {
+        self.ops.as_socket()
     }
 }

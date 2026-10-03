@@ -14,6 +14,7 @@ pub mod initramfs;
 pub mod pipe;
 pub mod poll;
 pub mod registry;
+pub mod socket;
 pub mod vfs;
 
 pub use fd::*;

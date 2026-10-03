@@ -8,6 +8,7 @@
 pub mod blk;
 pub mod chr;
 pub mod console;
+pub mod net;
 pub mod null;
 pub mod zero;
 
@@ -96,6 +97,21 @@ impl NodeOps for DevFsDirOps {
             }
         }
 
+        // 4. Check network devices
+        for dev in crate::drivers::get_netdevs() {
+            if dev.name() == name {
+                return Ok(Arc::new(INode::new(
+                    Box::new(net::GenericNetNodeOps::new(Arc::clone(&dev))),
+                    Mode::CHAR
+                        | Mode::RUSR
+                        | Mode::WUSR
+                        | Mode::RGRP
+                        | Mode::ROTH,
+                    100,
+                )));
+            }
+        }
+
         crate::return_errno!(ENOENT, "device not found")
     }
 
@@ -149,6 +165,11 @@ impl FileOps for DevFsDirFileOps {
         }
 
         for dev in crate::drivers::get_blkdevs() {
+            out.extend_from_slice(dev.name().as_bytes());
+            out.push(b'\n');
+        }
+
+        for dev in crate::drivers::get_netdevs() {
             out.extend_from_slice(dev.name().as_bytes());
             out.push(b'\n');
         }

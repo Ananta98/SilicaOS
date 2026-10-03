@@ -3,10 +3,10 @@
 pub mod console;
 pub mod ldisc;
 
-use alloc::sync::Arc;
-use spin::Once;
 use crate::drivers::register_chrdev;
+use alloc::sync::Arc;
 use console::Console;
+use spin::Once;
 
 static CONSOLE: Once<Arc<Console>> = Once::new();
 
@@ -30,10 +30,6 @@ pub fn handle_keyboard_char(ch: u8) {
         console.handle_input(ch);
     }
 }
-
-// ----------------------------------------------------------------------------
-// Kernel Module Declaration via module! macro
-// ----------------------------------------------------------------------------
 
 crate::module!(
     "TTY Console Subsystem",

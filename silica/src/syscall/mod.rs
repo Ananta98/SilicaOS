@@ -22,6 +22,7 @@
 pub mod arch;
 pub mod fs;
 pub mod mm;
+pub mod net;
 pub mod proc;
 pub mod sched;
 

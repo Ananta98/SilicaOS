@@ -4,6 +4,7 @@
 
 use alloc::{
     boxed::Box,
+    string::String,
     sync::Arc,
     vec,
     vec::Vec,
@@ -20,7 +21,8 @@ use crate::{
             superblock::SuperBlock,
         },
         vfs::{
-            FileOps, FileSystem, INode, INodeAttr, NodeOps, OpenFlags, SeekAnchor,
+            FileOps, FileSystem, INode, INodeAttr, INodeTimes, NodeOps, OpenFlags, SeekAnchor,
+            StatFs,
         },
     },
 };
@@ -188,6 +190,11 @@ impl Ext2Fs {
                 ino,
                 raw,
             })
+        } else if raw.is_symlink() {
+            Box::new(Ext2SymlinkNodeOps {
+                fs: Arc::clone(self),
+                raw,
+            })
         } else {
             Box::new(Ext2FileNodeOps {
                 fs: Arc::clone(self),
@@ -196,7 +203,13 @@ impl Ext2Fs {
             })
         };
 
-        Ok(Arc::new(INode::new_with_attr(node_ops, ino as usize, attr)))
+        let node = Arc::new(INode::new_with_attr(node_ops, ino as usize, attr));
+        node.set_times(INodeTimes {
+            atime: raw.atime as u64,
+            mtime: raw.mtime as u64,
+            ctime: raw.ctime as u64,
+        });
+        Ok(node)
     }
 }
 
@@ -213,6 +226,18 @@ impl FileSystem for Ext2Fs {
             block_groups: self.block_groups.clone(),
         });
         arc_self.get_vfs_inode(EXT2_ROOT_INO)
+    }
+
+    fn statfs(&self) -> Result<StatFs> {
+        Ok(StatFs {
+            bsize: self.block_size as u64,
+            blocks: self.sb.blocks_count as u64,
+            bfree: self.sb.free_blocks_count as u64,
+            bavail: self.sb.free_blocks_count.saturating_sub(self.sb.r_blocks_count) as u64,
+            files: self.sb.inodes_count as u64,
+            ffree: self.sb.free_inodes_count as u64,
+            namelen: 255,
+        })
     }
 }
 
@@ -338,5 +363,45 @@ impl FileOps for Ext2FileOps {
             crate::return_errno!(EINVAL, "invalid seek position");
         }
         Ok(new_offset as u64)
+    }
+}
+
+pub struct Ext2SymlinkNodeOps {
+    fs: Arc<Ext2Fs>,
+    raw: Ext2RawInode,
+}
+
+impl NodeOps for Ext2SymlinkNodeOps {
+    fn readlink(&self) -> Result<String> {
+        let size = self.raw.size() as usize;
+        let mut target_bytes = vec![0u8; size];
+        if size <= 60 {
+            let mut offset = 0;
+            for b in &self.raw.block {
+                let bytes = b.to_le_bytes();
+                for byte in bytes {
+                    if offset < size {
+                        target_bytes[offset] = byte;
+                        offset += 1;
+                    }
+                }
+            }
+        } else {
+            self.fs.read_inode_data(&self.raw, 0, &mut target_bytes)?;
+        }
+
+        let s = core::str::from_utf8(&target_bytes).map_err(|_| Errno::EIO)?;
+        Ok(String::from(s))
+    }
+
+    fn getattr(&self) -> Result<INodeAttr> {
+        Ok(INodeAttr {
+            size: self.raw.size() as usize,
+            mode: self.raw.vfs_mode(),
+            nlink: self.raw.links_count as usize,
+            uid: self.raw.uid as u32,
+            gid: self.raw.gid as u32,
+            rdev: 0,
+        })
     }
 }

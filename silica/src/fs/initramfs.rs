@@ -11,7 +11,7 @@ use spin::RwLock;
 
 use crate::api::errno::{Errno, Result};
 use crate::fs::vfs::{
-    FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags, SeekAnchor,
+    FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags, SeekAnchor, StatFs,
 };
 use crate::utils::cpio::{CpioArchive, FileType};
 
@@ -65,6 +65,27 @@ impl NodeOps for InitramfsFileNodeOps {
         Ok(INodeAttr {
             size: self.data.len(),
             mode: Mode::FILE | Mode::RUSR | Mode::RGRP | Mode::ROTH | Mode::XUSR | Mode::XGRP | Mode::XOTH,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+        })
+    }
+}
+
+pub struct InitramfsSymlinkNodeOps {
+    target: &'static str,
+}
+
+impl NodeOps for InitramfsSymlinkNodeOps {
+    fn readlink(&self) -> Result<String> {
+        Ok(String::from(self.target))
+    }
+
+    fn getattr(&self) -> Result<INodeAttr> {
+        Ok(INodeAttr {
+            size: self.target.len(),
+            mode: Mode::LINK | Mode::RUSR | Mode::RGRP | Mode::ROTH | Mode::XUSR | Mode::XGRP | Mode::XOTH,
             nlink: 1,
             uid: 0,
             gid: 0,
@@ -212,6 +233,27 @@ impl InitramfsFs {
                             dir_map.insert(full_dir_path, new_dir_entries);
                         }
                     }
+                    FileType::Symlink => {
+                        let target_str = core::str::from_utf8(entry.data).unwrap_or("");
+                        let symlink_node = Arc::new(INode::new_with_attr(
+                            Box::new(InitramfsSymlinkNodeOps { target: target_str }),
+                            ino,
+                            INodeAttr {
+                                size: target_str.len(),
+                                mode: Mode::LINK | Mode::RUSR | Mode::RGRP | Mode::ROTH | Mode::XUSR | Mode::XGRP | Mode::XOTH,
+                                nlink: 1,
+                                uid: entry.uid,
+                                gid: entry.gid,
+                                rdev: 0,
+                            },
+                        ));
+                        ino += 1;
+                        count += 1;
+
+                        if let Some(parent_entries) = dir_map.get(&parent_path) {
+                            parent_entries.write().insert((*leaf_name).into(), symlink_node);
+                        }
+                    }
                     _ => {
                         let file_node = Arc::new(INode::new_with_attr(
                             Box::new(InitramfsFileNodeOps { data: entry.data }),
@@ -250,6 +292,18 @@ impl FileSystem for InitramfsFs {
 
     fn root(&self) -> Result<Arc<INode>> {
         Ok(Arc::clone(&self.root))
+    }
+
+    fn statfs(&self) -> Result<StatFs> {
+        Ok(StatFs {
+            bsize: 4096,
+            blocks: 0,
+            bfree: 0,
+            bavail: 0,
+            files: 0,
+            ffree: 0,
+            namelen: 255,
+        })
     }
 }
 

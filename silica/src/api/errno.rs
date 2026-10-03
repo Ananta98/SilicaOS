@@ -45,6 +45,8 @@ pub enum Errno {
     EBUSY = 16,
     /// File exists.
     EEXIST = 17,
+    /// Invalid cross-device link.
+    EXDEV = 18,
     /// No such device.
     ENODEV = 19,
     /// Not a directory.
@@ -65,12 +67,16 @@ pub enum Errno {
     ESPIPE = 29,
     /// Read-only file system.
     EROFS = 30,
+    /// Broken pipe.
+    EPIPE = 32,
     /// Numerical result out of range.
     ERANGE = 34,
     /// File name too long.
     ENAMETOOLONG = 36,
     /// Function not implemented.
     ENOSYS = 38,
+    /// Directory not empty.
+    ENOTEMPTY = 39,
     /// Too many levels of symbolic links.
     ELOOP = 40,
     /// Value too large for defined data type.
@@ -116,6 +122,9 @@ impl Errno {
             Self::EFAULT => "EFAULT",
             Self::EBUSY => "EBUSY",
             Self::EEXIST => "EEXIST",
+            Self::EXDEV => "EXDEV",
+            Self::EPIPE => "EPIPE",
+            Self::ENOTEMPTY => "ENOTEMPTY",
             Self::ENODEV => "ENODEV",
             Self::ENOTDIR => "ENOTDIR",
             Self::EISDIR => "EISDIR",
@@ -152,6 +161,9 @@ impl Errno {
             Self::EFAULT => "bad address",
             Self::EBUSY => "device or resource busy",
             Self::EEXIST => "file exists",
+            Self::EXDEV => "invalid cross-device link",
+            Self::EPIPE => "broken pipe",
+            Self::ENOTEMPTY => "directory not empty",
             Self::ENODEV => "no such device",
             Self::ENOTDIR => "not a directory",
             Self::EISDIR => "is a directory",

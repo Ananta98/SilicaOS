@@ -20,6 +20,7 @@ use crate::{
         },
         vfs::{
             FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags, SeekAnchor,
+            StatFs,
         },
     },
 };
@@ -155,6 +156,20 @@ impl FileSystem for ExFatFs {
             cluster_mgr: ClusterManager::new(Arc::clone(&self.dev), self.bs),
         });
         Ok(arc_self.create_vfs_inode(root_entry, 1))
+    }
+
+    fn statfs(&self) -> Result<StatFs> {
+        let shift = self.bs.bytes_per_sector_shift + self.bs.sectors_per_cluster_shift;
+        let cluster_size = 1u64 << shift;
+        Ok(StatFs {
+            bsize: cluster_size,
+            blocks: self.bs.cluster_count as u64,
+            bfree: 0,
+            bavail: 0,
+            files: 0,
+            ffree: 0,
+            namelen: 255,
+        })
     }
 }
 

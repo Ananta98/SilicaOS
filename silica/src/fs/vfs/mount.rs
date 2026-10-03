@@ -46,6 +46,42 @@ impl PathNode {
         *new_mount.mount_point.write() = Some(self.clone());
         Ok(())
     }
+
+    /// Unmounts the filesystem whose root this node is.
+    ///
+    /// Fails with `EINVAL` if the node is not the root of a non-root mount, and
+    /// with `EBUSY` if another filesystem is still mounted somewhere beneath it.
+    /// Open files are not tracked per mount yet, so those do not block unmount.
+    pub fn umount(&self) -> Result<()> {
+        if !Arc::ptr_eq(&self.dentry, &self.mount.root) {
+            return Err(Errno::EINVAL);
+        }
+        let mount_point = self.mount.mount_point.read().clone().ok_or(Errno::EINVAL)?;
+
+        if has_submounts(&self.mount.root) {
+            return Err(Errno::EBUSY);
+        }
+
+        self.mount.fs.sync()?;
+
+        mount_point
+            .dentry
+            .mounts
+            .write()
+            .retain(|m| !Arc::ptr_eq(m, &self.mount));
+        *self.mount.mount_point.write() = None;
+        // Drop cached entries of the departing filesystem.
+        self.mount.root.children.write().clear();
+        Ok(())
+    }
+}
+
+/// Returns whether any cached dentry beneath `dentry` has a filesystem mounted on it.
+fn has_submounts(dentry: &Arc<DEntry>) -> bool {
+    if !dentry.mounts.read().is_empty() {
+        return true;
+    }
+    dentry.children.read().values().any(has_submounts)
 }
 
 /// Global root mount node of the VFS namespace.

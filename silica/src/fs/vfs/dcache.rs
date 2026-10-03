@@ -88,6 +88,11 @@ impl DEntry {
     pub fn add_child(&self, child: Arc<DEntry>) {
         self.children.write().insert(child.name.clone(), child);
     }
+
+    /// Removes a child from the cache, returning it if it was cached.
+    pub fn remove_child(&self, name: &str) -> Option<Arc<DEntry>> {
+        self.children.write().remove(name)
+    }
 }
 
 impl Debug for DEntry {

@@ -9,6 +9,7 @@ use crate::api::errno::{Errno, Result};
 use super::dcache::DEntry;
 use super::file::{File, OpenFlags};
 use super::mount::PathNode;
+use super::perms::{check_permission, current_cred, AccessFlags};
 
 bitflags! {
     /// Flags for path lookup operations.
@@ -21,12 +22,33 @@ bitflags! {
     }
 }
 
+/// Maximum number of symlinks followed during a single lookup.
+pub const MAX_SYMLINK_DEPTH: usize = 40;
+
 /// Resolves a path string starting from a base directory or root.
 pub fn lookup(
     root: PathNode,
     start: PathNode,
     path: &str,
-    _flags: LookupFlags,
+    flags: LookupFlags,
+) -> Result<PathNode> {
+    let mut depth = 0;
+    let node = lookup_inner(&root, start, path, flags, &mut depth)?;
+    if flags.contains(LookupFlags::DIRECTORY) {
+        let inode = node.dentry.get_inode().ok_or(Errno::ENOENT)?;
+        if !inode.is_dir() {
+            return Err(Errno::ENOTDIR);
+        }
+    }
+    Ok(node)
+}
+
+fn lookup_inner(
+    root: &PathNode,
+    start: PathNode,
+    path: &str,
+    flags: LookupFlags,
+    depth: &mut usize,
 ) -> Result<PathNode> {
     let mut current = if path.starts_with('/') {
         root.clone()
@@ -37,6 +59,7 @@ pub fn lookup(
     let mut components = path.split('/').filter(|s| !s.is_empty()).peekable();
 
     while let Some(comp) = components.next() {
+        let is_last = components.peek().is_none();
         match comp {
             "." => {
                 // Stay on current directory
@@ -59,6 +82,14 @@ pub fn lookup(
                 }
             }
             name => {
+                // Searching a directory requires execute permission on it.
+                let dir_inode = current.dentry.get_inode().ok_or(Errno::ENOENT)?;
+                if !dir_inode.is_dir() {
+                    return Err(Errno::ENOTDIR);
+                }
+                let dir_attr = *dir_inode.attr.read();
+                check_permission(&dir_attr, &current_cred(), AccessFlags::EXEC)?;
+
                 // Fast path: cached child dentry
                 let resolved_dentry = if let Some(entry) = current.dentry.lookup_child(name) {
                     entry
@@ -74,6 +105,23 @@ pub fn lookup(
                     current.dentry.add_child(new_dentry.clone());
                     new_dentry
                 };
+
+                // Follow symlinks (except a terminal one under NO_FOLLOW)
+                if let Some(inode) = resolved_dentry.get_inode() {
+                    if inode.is_symlink() && !(is_last && flags.contains(LookupFlags::NO_FOLLOW)) {
+                        *depth += 1;
+                        if *depth > MAX_SYMLINK_DEPTH {
+                            return Err(Errno::ELOOP);
+                        }
+                        let target = inode.node_ops.readlink()?;
+                        if target.is_empty() {
+                            return Err(Errno::ENOENT);
+                        }
+                        // Relative targets resolve against the symlink's parent directory.
+                        current = lookup_inner(root, current, &target, LookupFlags::empty(), depth)?;
+                        continue;
+                    }
+                }
 
                 // Check if the resolved dentry is a mount point
                 let mount_opt = resolved_dentry.mounts.read().last().cloned();
@@ -102,8 +150,27 @@ pub fn open(path: &str, flags: OpenFlags) -> Result<Arc<File>> {
         return Err(Errno::ENOTDIR);
     }
 
+    // Permission check against the inode's mode bits.
+    let mut access = AccessFlags::empty();
+    if flags.contains(OpenFlags::READ) {
+        access |= AccessFlags::READ;
+    }
+    if flags.contains(OpenFlags::WRITE) || flags.contains(OpenFlags::TRUNC) {
+        access |= AccessFlags::WRITE;
+    }
+    let attr = *inode.attr.read();
+    check_permission(&attr, &current_cred(), access)?;
+
     let ops = inode.node_ops.open(flags)?;
     let seekable = inode.is_file();
+
+    // O_TRUNC: only meaningful for regular files opened for writing.
+    if flags.contains(OpenFlags::TRUNC) && flags.contains(OpenFlags::WRITE) && inode.is_file() {
+        let mut attr = *inode.attr.read();
+        attr.size = 0;
+        inode.node_ops.setattr(&attr)?;
+        inode.set_size(0);
+    }
 
     let mut file = File::new(ops, inode, flags, seekable);
     file.abs_path = Some(path.as_bytes().to_vec());

@@ -9,6 +9,7 @@ use bitflags::bitflags;
 use spin::Mutex;
 
 use crate::api::errno::{Errno, Result};
+use crate::fs::poll::PollEvents;
 use super::inode::INode;
 
 bitflags! {
@@ -66,6 +67,34 @@ pub trait FileOps: Send + Sync {
     fn close(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Report current readiness for `poll(2)`.
+    ///
+    /// The default suits regular files and always-ready devices. Anything that
+    /// can block must override this and call `fs::poll::notify` when readiness
+    /// changes.
+    fn poll(&self) -> PollEvents {
+        PollEvents::IN | PollEvents::OUT | PollEvents::RDNORM | PollEvents::WRNORM
+    }
+
+    /// Flush buffered data (and, if `datasync` is false, metadata) to storage.
+    fn fsync(&self, _datasync: bool) -> Result<()> {
+        Ok(())
+    }
+
+    /// Whether `[offset, offset + len)` may be memory-mapped.
+    ///
+    /// Files that can serve page faults through [`FileOps::fault_in`] return
+    /// `Ok`; streams, pipes and most devices keep the default `ENODEV`.
+    fn mmap(&self, _offset: u64, _len: usize) -> Result<()> {
+        crate::return_errno!(ENODEV, "file does not support mmap");
+    }
+
+    /// Fills `buf` with the file contents at `offset` to satisfy a page fault
+    /// in a file-backed mapping.
+    fn fault_in(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        self.read(offset, buf)
+    }
 }
 
 /// The kernel representation of an open file description.
@@ -110,6 +139,7 @@ impl File {
         if self.seekable {
             *offset_guard = curr_offset.saturating_add(nread as u64);
         }
+        self.inode.touch_atime();
 
         Ok(nread)
     }
@@ -136,6 +166,7 @@ impl File {
                 self.inode.set_size(new_offset as usize);
             }
         }
+        self.inode.touch_mtime();
 
         Ok(nwritten)
     }
@@ -160,5 +191,23 @@ impl File {
     /// Closes the underlying file operations.
     pub fn close(&self) -> Result<()> {
         self.ops.close()
+    }
+
+    /// Current readiness for `poll(2)`.
+    pub fn poll(&self) -> PollEvents {
+        self.ops.poll()
+    }
+
+    /// Flushes the file to storage.
+    pub fn fsync(&self, datasync: bool) -> Result<()> {
+        self.ops.fsync(datasync)
+    }
+
+    /// Validates a memory-mapping request against this file.
+    pub fn mmap(&self, offset: u64, len: usize) -> Result<()> {
+        if !self.flags.lock().contains(OpenFlags::READ) {
+            return Err(Errno::EACCES);
+        }
+        self.ops.mmap(offset, len)
     }
 }

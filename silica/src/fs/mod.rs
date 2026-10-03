@@ -11,6 +11,8 @@ pub mod exfat;
 pub mod ext2;
 pub mod fd;
 pub mod initramfs;
+pub mod pipe;
+pub mod poll;
 pub mod registry;
 pub mod vfs;
 

@@ -5,33 +5,35 @@
 //! Provides permission checking against process credentials (`Ucred`),
 //! umask handling, sticky bit semantics, and standard mode bit definitions.
 
+use alloc::sync::Arc;
 use bitflags::bitflags;
 
-use crate::{
-    api::errno::{Errno, Result},
-    api::cred::{Gid, Ucred, Uid},
-};
 use super::inode::{INodeAttr, Mode};
+use crate::{
+    api::cred::{Gid, Ucred, Uid},
+    api::errno::{Errno, Result},
+    proc::thread::Thread,
+};
 
 // Standard UNIX permission bitmasks
 pub const S_ISUID: u32 = 0o4000; // Set user ID on execution
 pub const S_ISGID: u32 = 0o2000; // Set group ID on execution
 pub const S_ISVTX: u32 = 0o1000; // Sticky bit
 
-pub const S_IRWXU: u32 = 0o700;  // User read, write, execute
-pub const S_IRUSR: u32 = 0o400;  // User read
-pub const S_IWUSR: u32 = 0o200;  // User write
-pub const S_IXUSR: u32 = 0o100;  // User execute
+pub const S_IRWXU: u32 = 0o700; // User read, write, execute
+pub const S_IRUSR: u32 = 0o400; // User read
+pub const S_IWUSR: u32 = 0o200; // User write
+pub const S_IXUSR: u32 = 0o100; // User execute
 
-pub const S_IRWXG: u32 = 0o070;  // Group read, write, execute
-pub const S_IRGRP: u32 = 0o040;  // Group read
-pub const S_IWGRP: u32 = 0o020;  // Group write
-pub const S_IXGRP: u32 = 0o010;  // Group execute
+pub const S_IRWXG: u32 = 0o070; // Group read, write, execute
+pub const S_IRGRP: u32 = 0o040; // Group read
+pub const S_IWGRP: u32 = 0o020; // Group write
+pub const S_IXGRP: u32 = 0o010; // Group execute
 
-pub const S_IRWXO: u32 = 0o007;  // Other read, write, execute
-pub const S_IROTH: u32 = 0o004;  // Other read
-pub const S_IWOTH: u32 = 0o002;  // Other write
-pub const S_IXOTH: u32 = 0o001;  // Other execute
+pub const S_IRWXO: u32 = 0o007; // Other read, write, execute
+pub const S_IROTH: u32 = 0o004; // Other read
+pub const S_IWOTH: u32 = 0o002; // Other write
+pub const S_IXOTH: u32 = 0o001; // Other execute
 
 bitflags! {
     /// Requested access rights for access check.
@@ -40,6 +42,15 @@ bitflags! {
         const READ  = 1 << 0;
         const WRITE = 1 << 1;
         const EXEC  = 1 << 2;
+    }
+}
+
+/// Returns the credentials of the calling process, or root when there is no
+/// process context (early boot, kernel threads without a `Proc`).
+pub fn current_cred() -> Arc<Ucred> {
+    match Thread::current_proc() {
+        Some(proc) => proc.cred(),
+        None => Arc::new(Ucred::root()),
     }
 }
 

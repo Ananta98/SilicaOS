@@ -3,6 +3,7 @@
 //! INode abstractions for the VFS.
 
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::sync::Arc;
 use bitflags::bitflags;
 use spin::RwLock;
@@ -50,6 +51,9 @@ bitflags! {
     }
 }
 
+/// Mask selecting the file-type bits of a mode.
+pub const S_IFMT: u32 = 0o170000;
+
 /// Metadata attributes for an inode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct INodeAttr {
@@ -96,6 +100,29 @@ pub trait NodeOps: Send + Sync {
         crate::return_errno!(ENOSYS, "link not implemented");
     }
 
+    /// Create a special node (device, FIFO, socket) named `name`.
+    fn mknod(&self, _name: &str, _mode: Mode, _rdev: u64) -> Result<Arc<INode>> {
+        crate::return_errno!(ENOSYS, "mknod not implemented");
+    }
+
+    /// Move the entry `old_name` of this directory to `new_name` inside `new_dir`.
+    ///
+    /// The VFS has already validated permissions, sticky bits and that a
+    /// directory is not moved into its own subtree.
+    fn rename(&self, _old_name: &str, _new_dir: &Arc<INode>, _new_name: &str) -> Result<()> {
+        crate::return_errno!(ENOSYS, "rename not implemented");
+    }
+
+    /// Create a symbolic link `name` pointing at `target`.
+    fn symlink(&self, _name: &str, _target: &str) -> Result<Arc<INode>> {
+        crate::return_errno!(ENOSYS, "symlink not implemented");
+    }
+
+    /// Read the target path of a symbolic link.
+    fn readlink(&self) -> Result<String> {
+        crate::return_errno!(EINVAL, "not a symbolic link");
+    }
+
     /// Create a directory.
     fn mkdir(&self, _name: &str, _mode: Mode) -> Result<Arc<INode>> {
         crate::return_errno!(ENOSYS, "mkdir not implemented");
@@ -122,6 +149,25 @@ pub trait NodeOps: Send + Sync {
     }
 }
 
+/// Access / modification / status-change times, in seconds since boot.
+///
+/// Kept next to (not inside) [`INodeAttr`] so filesystem drivers that build an
+/// `INodeAttr` literal are unaffected. Drivers with on-disk timestamps may
+/// overwrite them through [`INode::set_times`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct INodeTimes {
+    pub atime: u64,
+    pub mtime: u64,
+    pub ctime: u64,
+}
+
+/// Preferred I/O block size reported through `stat`.
+pub const DEFAULT_BLKSIZE: usize = 4096;
+
+fn now_secs() -> u64 {
+    crate::sched::now() / crate::sched::TIMER_HZ
+}
+
 /// A standalone file system node (vnode).
 ///
 /// Represents a file, directory, or special device in a generic way within the VFS.
@@ -132,38 +178,94 @@ pub struct INode {
     pub node_ops: Box<dyn NodeOps>,
     /// Consolidated metadata attributes protected by a single RwLock.
     pub attr: RwLock<INodeAttr>,
+    /// Access / modification / change times.
+    pub times: RwLock<INodeTimes>,
 }
 
 impl INode {
     /// Creates a new INode.
     pub fn new(ops: Box<dyn NodeOps>, mode: Mode, id: usize) -> Self {
-        Self {
+        Self::new_with_attr(
+            ops,
             id,
-            node_ops: ops,
-            attr: RwLock::new(INodeAttr {
+            INodeAttr {
                 mode,
                 ..Default::default()
-            }),
-        }
+            },
+        )
     }
 
     /// Creates an INode with full initial attributes.
     pub fn new_with_attr(ops: Box<dyn NodeOps>, id: usize, attr: INodeAttr) -> Self {
+        let now = now_secs();
         Self {
             id,
             node_ops: ops,
             attr: RwLock::new(attr),
+            times: RwLock::new(INodeTimes {
+                atime: now,
+                mtime: now,
+                ctime: now,
+            }),
         }
+    }
+
+    /// Returns the timestamps of this inode.
+    pub fn times(&self) -> INodeTimes {
+        *self.times.read()
+    }
+
+    /// Overwrites the timestamps (for drivers with on-disk times).
+    pub fn set_times(&self, times: INodeTimes) {
+        *self.times.write() = times;
+    }
+
+    /// Records an access (`atime`).
+    pub fn touch_atime(&self) {
+        self.times.write().atime = now_secs();
+    }
+
+    /// Records a content modification (`mtime` and `ctime`).
+    pub fn touch_mtime(&self) {
+        let now = now_secs();
+        let mut t = self.times.write();
+        t.mtime = now;
+        t.ctime = now;
+    }
+
+    /// Records a metadata change (`ctime`).
+    pub fn touch_ctime(&self) {
+        self.times.write().ctime = now_secs();
+    }
+
+    /// Preferred I/O block size for `stat`.
+    pub fn blksize(&self) -> usize {
+        DEFAULT_BLKSIZE
+    }
+
+    /// Number of 512-byte blocks allocated, for `stat`.
+    pub fn blocks(&self) -> usize {
+        self.size().div_ceil(512)
+    }
+
+    /// Returns the file-type bits (`S_IFMT`) of this inode's mode.
+    fn file_type(&self) -> u32 {
+        self.attr.read().mode.bits() & S_IFMT
     }
 
     /// Checks if the inode represents a directory.
     pub fn is_dir(&self) -> bool {
-        self.attr.read().mode.contains(Mode::DIR)
+        self.file_type() == Mode::DIR.bits()
     }
 
     /// Checks if the inode represents a regular file.
     pub fn is_file(&self) -> bool {
-        self.attr.read().mode.contains(Mode::FILE)
+        self.file_type() == Mode::FILE.bits()
+    }
+
+    /// Checks if the inode represents a symbolic link.
+    pub fn is_symlink(&self) -> bool {
+        self.file_type() == Mode::LINK.bits()
     }
 
     /// Returns the current size of the inode.

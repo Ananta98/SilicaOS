@@ -17,7 +17,7 @@ pub use zero::ZeroFile;
 
 use crate::{
     api::errno::Result,
-    fs::vfs::{FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags},
+    fs::vfs::{FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags, StatFs},
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use blk::GenericBlkNodeOps;
@@ -192,5 +192,17 @@ impl FileSystem for DevFs {
                 | Mode::XOTH,
             0,
         )))
+    }
+
+    fn statfs(&self) -> Result<StatFs> {
+        Ok(StatFs {
+            bsize: 4096,
+            blocks: 0,
+            bfree: 0,
+            bavail: 0,
+            files: 0,
+            ffree: 0,
+            namelen: 255,
+        })
     }
 }

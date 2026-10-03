@@ -104,6 +104,11 @@ impl Ext2RawInode {
         (self.mode & 0xF000) == 0x8000
     }
 
+    /// Checks if this inode is a symbolic link.
+    pub fn is_symlink(&self) -> bool {
+        (self.mode & 0xF000) == 0xA000
+    }
+
     /// Converts Ext2 mode to VFS Mode.
     pub fn vfs_mode(&self) -> Mode {
         let mut m = Mode::from_bits_truncate((self.mode & 0x0FFF) as u32);
@@ -111,6 +116,8 @@ impl Ext2RawInode {
             m |= Mode::DIR;
         } else if self.is_file() {
             m |= Mode::FILE;
+        } else if self.is_symlink() {
+            m |= Mode::LINK;
         }
         m
     }

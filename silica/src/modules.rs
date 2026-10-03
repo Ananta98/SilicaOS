@@ -124,7 +124,6 @@ pub fn do_initcalls() -> Result<()> {
 ///
 /// # Examples
 /// ```
-/// module!("VirtIO block driver", "Author Name", main);
 /// module!("Ext2 Filesystem", "SilicaOS Team", InitcallLevel::Fs, init);
 /// ```
 #[macro_export]

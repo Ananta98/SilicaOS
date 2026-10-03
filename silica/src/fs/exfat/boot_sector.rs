@@ -2,7 +2,7 @@
 
 //! ExFAT Volume Boot Record (Boot Sector) parsing and validation.
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 /// ExFAT filesystem identifier ("EXFAT   ").
 pub const EXFAT_FS_NAME: &[u8; 8] = b"EXFAT   ";

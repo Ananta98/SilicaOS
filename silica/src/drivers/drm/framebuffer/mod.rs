@@ -22,7 +22,7 @@ pub use pixel::{Color, PixelFormat};
 use alloc::sync::Arc;
 use spin::{Mutex, Once};
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 static FRAMEBUFFER: Once<Arc<Framebuffer>> = Once::new();
 static CONSOLE: Once<Mutex<FbConsole>> = Once::new();

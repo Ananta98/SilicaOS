@@ -9,7 +9,7 @@ use ostd::{
 };
 
 use crate::{
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     fs::{lookup, root, vfs::LookupFlags},
     proc::thread::Thread,
     vm::vmar::Vmar,

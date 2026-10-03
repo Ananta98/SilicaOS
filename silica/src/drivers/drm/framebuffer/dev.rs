@@ -15,7 +15,7 @@ use ostd::mm::{io::FallibleVmRead, FallibleVmWrite};
 use super::{fb::Framebuffer, pixel::PixelFormat};
 use crate::{
     drivers::CharacterDevice,
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     proc::thread::Thread,
 };
 

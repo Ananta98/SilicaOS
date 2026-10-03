@@ -7,7 +7,7 @@ use alloc::sync::Arc;
 use bitflags::bitflags;
 use spin::RwLock;
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 use super::file::{FileOps, OpenFlags};
 
 bitflags! {

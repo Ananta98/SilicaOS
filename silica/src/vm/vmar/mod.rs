@@ -8,7 +8,7 @@
 //! describe what has been placed in it.
 //!
 //! Every operation here works on page-aligned ranges and reports failures as
-//! POSIX [`Errno`](crate::errno::Errno) values, so that the syscall layer is a
+//! POSIX [`Errno`](crate::api::errno::Errno) values, so that the syscall layer is a
 //! thin argument-validation shell around these methods.
 
 mod fork;
@@ -30,7 +30,7 @@ use core::{
 use ostd::mm::{MAX_USERSPACE_VADDR, PAGE_SIZE, Vaddr, VmSpace};
 use ostd::sync::{PreemptDisabled, RwLock, RwLockReadGuard};
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 pub use self::mappings::VmMapping;
 use self::mappings::{CarveOutcome, Mappings};

@@ -6,10 +6,7 @@
 //! enforces W^X permissions via [`Vmar::mprotect`], and replaces process address spaces.
 
 use alloc::{sync::Arc, vec::Vec};
-use ostd::{
-    mm::io::FallibleVmWrite,
-    user::UserContextApi,
-};
+use ostd::{mm::io::FallibleVmWrite, user::UserContextApi};
 use xmas_elf::{
     ElfFile,
     header::{Class, Data, Machine},
@@ -17,13 +14,12 @@ use xmas_elf::{
 };
 
 use crate::{
-    errno::{Errno, Result},
-    proc::thread::Thread,
-    vm::{
-        VMAR_CAP_ADDR, VMAR_LOWEST_ADDR, Vmar,
-        flags::MmapFlags,
-        perms::VmPerms,
+    api::{
+        errno::{Errno, Result},
+        signal::SigHandler,
     },
+    proc::thread::Thread,
+    vm::{VMAR_CAP_ADDR, VMAR_LOWEST_ADDR, Vmar, flags::MmapFlags, perms::VmPerms},
 };
 
 /// High address limit for the user stack.
@@ -78,10 +74,14 @@ pub fn load_elf(vmar: &Arc<Vmar>, elf_data: &[u8]) -> Result<usize> {
 
         let page_start = vaddr & !(ostd::mm::PAGE_SIZE - 1);
         let page_offset = vaddr - page_start;
-        let total_span = (page_offset + mem_sz + ostd::mm::PAGE_SIZE - 1) & !(ostd::mm::PAGE_SIZE - 1);
+        let total_span =
+            (page_offset + mem_sz + ostd::mm::PAGE_SIZE - 1) & !(ostd::mm::PAGE_SIZE - 1);
 
         if page_start < VMAR_LOWEST_ADDR || page_start.saturating_add(total_span) > VMAR_CAP_ADDR {
-            crate::return_errno!(ENOEXEC, "segment address range outside allowed userspace limits");
+            crate::return_errno!(
+                ENOEXEC,
+                "segment address range outside allowed userspace limits"
+            );
         }
 
         let mut final_perms = VmPerms::empty();
@@ -147,9 +147,14 @@ pub fn load_elf(vmar: &Arc<Vmar>, elf_data: &[u8]) -> Result<usize> {
 
 fn push_bytes(vmar: &Arc<Vmar>, sp: &mut usize, bytes: &[u8]) -> Result<usize> {
     *sp -= bytes.len();
-    let mut writer = vmar.vm_space().writer(*sp, bytes.len()).map_err(|_| Errno::EFAULT)?;
+    let mut writer = vmar
+        .vm_space()
+        .writer(*sp, bytes.len())
+        .map_err(|_| Errno::EFAULT)?;
     let mut reader = ostd::mm::VmReader::from(bytes);
-    writer.write_fallible(&mut reader).map_err(|_| Errno::EFAULT)?;
+    writer
+        .write_fallible(&mut reader)
+        .map_err(|_| Errno::EFAULT)?;
     Ok(*sp)
 }
 
@@ -210,8 +215,8 @@ pub fn setup_user_stack(
     // 4. Construct auxiliary vector (AT_NULL, AT_PAGESZ, AT_ENTRY)
     let auxv: [(u64, u64); 3] = [
         (6, ostd::mm::PAGE_SIZE as u64), // AT_PAGESZ
-        (9, entry_point as u64),        // AT_ENTRY
-        (0, 0),                         // AT_NULL
+        (9, entry_point as u64),         // AT_ENTRY
+        (0, 0),                          // AT_NULL
     ];
 
     // Calculate total 8-byte entries on stack:
@@ -267,12 +272,7 @@ pub fn load_and_setup(
 /// [`Thread::user_loop`] again from inside the syscall that is meant to replace
 /// it. The call never returns, the previous program is not torn down, and no
 /// syscall dispatches here yet.
-pub fn kern_execve(
-    td: &Thread,
-    path: &str,
-    argv: &[&str],
-    envp: &[&str],
-) -> Result<()> {
+pub fn kern_execve(td: &Thread, path: &str, argv: &[&str], envp: &[&str]) -> Result<()> {
     let proc = td.proc().ok_or(Errno::ESRCH)?;
 
     // Locate binary from initramfs
@@ -292,8 +292,8 @@ pub fn kern_execve(
     {
         let mut sigacts = proc.sigacts.lock();
         for act in sigacts.actions.iter_mut() {
-            if matches!(act.sa_handler, super::signal::SigHandler::Handler(_)) {
-                act.sa_handler = super::signal::SigHandler::Default;
+            if matches!(act.sa_handler, SigHandler::Handler(_)) {
+                act.sa_handler = SigHandler::Default;
             }
         }
     }

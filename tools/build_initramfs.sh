@@ -17,15 +17,43 @@ mkdir -p "$BUILD_DIR"/{bin,boot,dev,etc/defaults,lib,libexec,media,mnt,proc,resc
 chmod 1777 "$BUILD_DIR"/tmp "$BUILD_DIR"/var/tmp
 chmod 0700 "$BUILD_DIR"/root
 
-# Build the init binary if tools/init.s exists
+# Assemble a freestanding source file into a static, libc-free ELF and install
+# it at every given path in the image.
+build_freestanding() {
+    local src="$1"
+    shift
+    echo "Assembling $src..."
+    # Both intermediates go to a scratch directory: anything left inside
+    # "$BUILD_DIR" ends up in the image, and an ELF at the image root would be
+    # picked up by init's candidate path list.
+    local work out
+    work="$(mktemp -d -t silica-asm-XXXXXX)"
+    as "$src" -o "$work/unlinked.o"
+    out="$work/$(basename "$src" .s)"
+    ld -nostdlib -no-pie "$work/unlinked.o" -o "$out"
+    local dest
+    for dest in "$@"; do
+        cp "$out" "$BUILD_DIR/$dest"
+        chmod 0755 "$BUILD_DIR/$dest"
+    done
+    rm -rf "$work"
+    echo "Installed $*"
+}
+
+# The boot process. Must call exit(2) as well as write(2): process teardown is
+# only observable if something actually exits.
 if [ -f "tools/init.s" ]; then
-    echo "Assembling tools/init.s..."
-    as tools/init.s -o /tmp/init.o
-    ld -nostdlib -no-pie /tmp/init.o -o "$BUILD_DIR/init"
-    rm -f /tmp/init.o
-    chmod 0755 "$BUILD_DIR/init"
-    cp "$BUILD_DIR/init" "$BUILD_DIR/sbin/init"
-    echo "Installed /init and /sbin/init in initramfs"
+    build_freestanding tools/init.s init sbin/init
+else
+    echo "WARNING: tools/init.s is missing; the image will have no init process."
+fi
+
+# The signal test. Not run by default: boot it deliberately with
+# `init=/sbin/sigtest` so an ordinary boot stays quiet.
+if [ -f "tools/sigtest.s" ]; then
+    build_freestanding tools/sigtest.s sbin/sigtest
+else
+    echo "WARNING: tools/sigtest.s is missing; the signal test will be absent."
 fi
 
 # Build the CPIO archive (newc format)

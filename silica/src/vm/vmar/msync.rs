@@ -36,7 +36,7 @@ use core::ops::Range;
 
 use ostd::mm::{PAGE_SIZE, Vaddr};
 
-use crate::{errno::Result, vm::flags::MsyncFlags};
+use crate::{api::errno::Result, vm::flags::MsyncFlags};
 
 use super::{Vmar, is_mappable_range, mappings::VmMapping};
 

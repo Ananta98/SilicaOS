@@ -7,14 +7,13 @@
 //! open file descriptors, and starts the child execution thread.
 
 use alloc::sync::{Arc, Weak};
-use ostd::{
-    arch::cpu::context::UserContext,
-    sync::SpinLock,
-    task::TaskOptions,
-};
+use ostd::{arch::cpu::context::UserContext, sync::SpinLock, task::TaskOptions};
 
 use crate::{
-    errno::{Errno, Result},
+    api::{
+        errno::{Errno, Result},
+        signal::{SigActs, SigQueue},
+    },
     proc::{
         Proc,
         thread::{Thread, ThreadFlags, ThreadInner, ThreadState, alloc_tid},
@@ -35,18 +34,14 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
     let child_vmar = Vmar::fork_from(&parent_vmar);
 
     // 3. Clone file descriptor table
-    let child_fd_table = Arc::new(SpinLock::new(
-        caller_proc.fd_table.lock().clone_table(),
-    ));
+    let child_fd_table = Arc::new(SpinLock::new(caller_proc.fd_table.lock().clone_table()));
 
     // 4. Share credentials and limits (Copy-on-Write)
     let child_cred = caller_proc.cred();
     let child_limit = caller_proc.limit();
-    let child_sigacts = Arc::new(SpinLock::new(
-        super::signal::SigActs {
-            actions: caller_proc.sigacts.lock().actions,
-        },
-    ));
+    let child_sigacts = Arc::new(SpinLock::new(SigActs {
+        actions: caller_proc.sigacts.lock().actions,
+    }));
 
     let comm = caller_proc.comm_name();
 
@@ -64,9 +59,10 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
 
     // 6. Set up child's user context
     let mut child_ctx = caller_user_ctx.cloned().unwrap_or_default();
-    // In child, fork returns 0 in rax, and carry flag is cleared
+    // `fork(2)` returns 0 in the child and the child's PID in the parent. Only
+    // `rax` differs; the flags are left exactly as the caller had them, which is
+    // what keeps OSTD's `sysret` fast path available on the child's first return.
     child_ctx.general_regs_mut().rax = 0;
-    child_ctx.general_regs_mut().rflags &= !(1 << 0);
 
     // 7. Create child thread & task
     let child_tid = alloc_tid();
@@ -96,7 +92,7 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
                 state: ThreadState::CanRun,
                 flags: ThreadFlags::empty(),
                 sigmask: caller_td_inner.sigmask,
-                sigqueue: super::signal::SigQueue::new(),
+                sigqueue: SigQueue::new(),
                 wchan: None,
                 wmesg: "",
                 name: caller_td_inner.name,

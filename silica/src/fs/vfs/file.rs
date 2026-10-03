@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use bitflags::bitflags;
 use spin::Mutex;
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 use super::inode::INode;
 
 bitflags! {

@@ -5,7 +5,7 @@
 //! Provides protocol constants and command abstractions for PS/2 keyboards,
 //! mice, and auxiliary input devices connected to the i8042 microcontroller.
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 use super::controller::I8042Controller;
 
 // ----------------------------------------------------------------------------

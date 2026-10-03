@@ -8,7 +8,7 @@
 use alloc::string::String;
 use crate::drivers::CharacterDevice;
 use crate::drivers::char::tty::ldisc::LineDiscipline;
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 /// The main system console device
 pub struct Console {

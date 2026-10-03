@@ -19,7 +19,7 @@ use ostd::mm::{
 use ostd::task::disable_preempt;
 
 use crate::{
-    errno::Result,
+    api::errno::Result,
     vm::{backing::alloc_zeroed_frame, perms::VmPerms},
 };
 
@@ -123,14 +123,14 @@ impl PageFaultInfo {
 impl Vmar {
     /// Resolves a page fault, if this address space can.
     ///
-    /// Returns [`crate::errno::Errno::EACCES`] when no mapping covers the
+    /// Returns [`crate::api::errno::Errno::EACCES`] when no mapping covers the
     /// address, which the caller reports to the faulting process as a fault
     /// signal.
     ///
     /// # A fault below the mappings
     ///
     /// An address that no mapping covers is nearly always a genuine error, and
-    /// that is what the [`EACCES`](crate::errno::Errno::EACCES) below reports.
+    /// that is what the [`EACCES`](crate::api::errno::Errno::EACCES) below reports.
     /// The exception is a fault on the page just below a stack that has run out
     /// of room: a mapping created with `MAP_GROWSDOWN` is extended to cover it,
     /// which is what lets an ordinary function call push a frame without a

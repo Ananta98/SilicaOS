@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 use ostd::arch::cpu::context::UserContext;
 
 pub fn sys_setpgid(_pid: i32, _pgid: i32, _ctx: &mut UserContext) -> Result<usize> {

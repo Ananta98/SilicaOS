@@ -14,7 +14,7 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use core::fmt;
 use spin::Mutex;
 
-use crate::{drivers::bus::pci::PciDevice, errno::Result};
+use crate::{api::errno::Result, drivers::bus::pci::PciDevice};
 
 // ----------------------------------------------------------------------------
 // Device Registries

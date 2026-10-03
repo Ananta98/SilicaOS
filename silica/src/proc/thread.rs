@@ -7,11 +7,11 @@
 //! and handles transitions between Ring 0 and Ring 3 via [`ostd::user::UserMode`].
 
 use alloc::sync::{Arc, Weak};
+use bitflags::bitflags;
 use core::{
     num::NonZeroU32,
     sync::atomic::{AtomicU32, Ordering},
 };
-use bitflags::bitflags;
 use ostd::{
     arch::cpu::context::{CpuException, UserContext},
     sync::SpinLock,
@@ -19,12 +19,8 @@ use ostd::{
     user::{DummyUserHooks, ReturnReason, UserMode},
 };
 
-use super::{
-    COMM_LEN,
-    ExitStatus,
-    Proc,
-    signal::{SigQueue, SigSet, Signal},
-};
+use super::{COMM_LEN, ExitStatus, Proc};
+use crate::api::signal::{SigHandler, SigQueue, SigSet, Signal};
 
 /// Thread identifier wrapper.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -237,8 +233,8 @@ impl Thread {
 
         let action = proc.sigacts.lock().get(sig);
         match action.sa_handler {
-            super::signal::SigHandler::Ignore => {}
-            super::signal::SigHandler::Default => {
+            SigHandler::Ignore => {}
+            SigHandler::Default => {
                 match sig {
                     Signal::SIGCHLD | Signal::SIGCONT | Signal::SIGWINCH => {
                         // Default is ignore
@@ -249,14 +245,17 @@ impl Thread {
                     }
                     _ => {
                         // Default is terminate process
-                        super::exit::exit1(self, ExitStatus::Signaled {
-                            signal: sig,
-                            core_dumped: false,
-                        });
+                        super::exit::exit1(
+                            self,
+                            ExitStatus::Signaled {
+                                signal: sig,
+                                core_dumped: false,
+                            },
+                        );
                     }
                 }
             }
-            super::signal::SigHandler::Handler(_handler_addr) => {
+            SigHandler::Handler(_handler_addr) => {
                 // TODO: user handlers. Nothing sets a disposition either --
                 // `rt_sigaction` does not exist, so `SigHandler::Handler` is
                 // unreachable -- and a handler needs a signal frame built on the

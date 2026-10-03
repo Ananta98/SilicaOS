@@ -80,14 +80,20 @@ pub enum Errno {
 }
 
 impl Errno {
-    /// Returns the numeric value that user space observes.
+    /// Returns the value user space observes for a *successful* syscall.
+    ///
+    /// This is the bare POSIX number. It is what [`Errno::description`] style
+    /// diagnostics want, and the input to [`Errno::to_posix_raw`].
     pub const fn as_i32(self) -> i32 {
         self as i32
     }
 
-    /// Returns the raw POSIX error value for user space.
+    /// Returns the value a syscall hands back in `rax` when it fails.
+    ///
+    /// Linux user space treats anything in `-4095..=-1` in `rax` as an error and
+    /// negates it to get `errno`, so this is the number already negated.
     pub const fn to_posix_raw(self) -> i32 {
-        self as i32
+        -((self as i32) as isize as i32)
     }
 
     /// Returns the name of the error, as it is spelled in the C headers.
@@ -209,10 +215,10 @@ pub type Result<T, E = Errno> = core::result::Result<T, E>;
 #[macro_export]
 macro_rules! return_errno {
     ($errno:ident) => {
-        return ::core::result::Result::Err($crate::errno::Errno::$errno)
+        return ::core::result::Result::Err($crate::api::errno::Errno::$errno)
     };
     ($errno:ident, $($arg:tt)+) => {{
         let _ = ::core::format_args!($($arg)+);
-        return ::core::result::Result::Err($crate::errno::Errno::$errno);
+        return ::core::result::Result::Err($crate::api::errno::Errno::$errno);
     }};
 }

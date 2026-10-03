@@ -33,7 +33,7 @@ pub use config::{
 pub use device::PciDevice;
 pub use scan::scan_bus;
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 /// Global registry of discovered PCI devices.
 pub static PCI_DEVICES: Mutex<Vec<PciDevice>> = Mutex::new(Vec::new());

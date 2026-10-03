@@ -9,12 +9,12 @@ use alloc::{sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use ostd::sync::WaitQueue;
 
-use crate::errno::Result;
 use super::{
     ExitStatus, Proc, ProcState,
     exit::proc_reap,
     tree::{Pid, allproc_find},
 };
+use crate::api::errno::Result;
 
 bitflags! {
     /// Options for `wait6(2)`.
@@ -165,14 +165,10 @@ pub fn kern_wait6(
         // the candidate list: the woken child may have been reaped by another
         // waiter in the meantime.
         WAIT_QUEUE.wait_until(|| {
-            let has_zombie = candidates
-                .iter()
-                .any(|&child_pid| allproc_find(child_pid).is_some_and(|c| c.state() == ProcState::Zombie));
-            if has_zombie {
-                Some(())
-            } else {
-                None
-            }
+            let has_zombie = candidates.iter().any(|&child_pid| {
+                allproc_find(child_pid).is_some_and(|c| c.state() == ProcState::Zombie)
+            });
+            if has_zombie { Some(()) } else { None }
         });
         candidates = child_candidates(parent, idtype)?;
     }

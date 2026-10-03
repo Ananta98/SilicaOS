@@ -10,7 +10,7 @@ pub mod framebuffer;
 
 pub use framebuffer::get_console;
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 /// Initializes the display and framebuffer subsystem.
 pub fn init() -> Result<()> {

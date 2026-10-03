@@ -8,7 +8,7 @@ use core::num::NonZeroUsize;
 use ostd::mm::{PAGE_SIZE, Vaddr, VmSpace};
 
 use crate::{
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     vm::{backing::Backing, flags::MmapFlags, perms::VmPerms, reclaim},
 };
 
@@ -42,7 +42,7 @@ impl Vmar {
 
     /// Maps `len` bytes of `backing`, starting at `offset` within it.
     ///
-    /// The mapping is rejected with [`EINVAL`](crate::errno::Errno::EINVAL) if
+    /// The mapping is rejected with [`EINVAL`](crate::api::errno::Errno::EINVAL) if
     /// it would reach past the end of the object, so that a mapping always has
     /// backing and never has to answer a fault with a signal.
     pub fn mmap_backed(

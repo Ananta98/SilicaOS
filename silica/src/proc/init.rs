@@ -10,24 +10,13 @@ use alloc::{string::String, sync::Arc};
 use ostd::user::UserContextApi;
 
 use crate::{
-    cmdline,
-    errno::{Errno, Result},
-    fs,
-    proc::{
-        create_init_process_with_vmar, create_main_thread,
-        exec::load_and_setup,
-        Proc,
-    },
+    api::errno::{Errno, Result},
+    cmdline, fs,
+    proc::{Proc, create_init_process_with_vmar, create_main_thread, exec::load_and_setup},
 };
 
 /// Candidate binary paths inspected when looking for the initial userspace process.
-const INIT_CANDIDATE_PATHS: &[&str] = &[
-    "/init",
-    "init",
-    "/sbin/init",
-    "/bin/init",
-    "/bin/sh",
-];
+const INIT_CANDIDATE_PATHS: &[&str] = &["/init", "init", "/sbin/init", "/bin/init", "/bin/sh"];
 
 /// Attempts to locate the init ELF binary across candidate locations.
 fn find_init_binary() -> Option<(String, &'static [u8])> {

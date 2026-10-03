@@ -8,7 +8,7 @@
 use alloc::{sync::Arc, vec::Vec};
 use bitflags::bitflags;
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 use crate::fs::devfs::{ConsoleFile, NullFile};
 use crate::fs::vfs::File;
 

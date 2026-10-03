@@ -5,12 +5,16 @@
 //! Manages process tree hierarchy, process lookups, PID allocation, and reparenting
 //! to designated reapers or init (PID 1).
 
-use alloc::{collections::{BTreeMap, BTreeSet}, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
+};
 use core::num::NonZeroU32;
 use ostd::sync::{RwLock, SpinLock};
 
-use crate::errno::Result;
 use super::Proc;
+use crate::api::errno::Result;
 
 /// Maximum process identifier value.
 pub const PID_MAX: u32 = 99999;
@@ -69,7 +73,11 @@ impl PidAllocator {
         let start = self.next;
         loop {
             let candidate = self.next;
-            self.next = if self.next >= PID_MAX { 1 } else { self.next + 1 };
+            self.next = if self.next >= PID_MAX {
+                1
+            } else {
+                self.next + 1
+            };
 
             if !self.allocated.contains(&candidate) {
                 self.allocated.insert(candidate);

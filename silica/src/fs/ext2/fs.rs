@@ -11,7 +11,7 @@ use alloc::{
 
 use crate::{
     drivers::block::BlockDevice,
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     fs::{
         ext2::{
             block_group::BlockGroupDescriptor,

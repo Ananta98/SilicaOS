@@ -17,7 +17,7 @@
 
 use core::{fmt::Debug, ops::Range};
 use ostd::mm::{FrameAllocOptions, UFrame};
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 /// A source of physical pages for a mapping.
 ///

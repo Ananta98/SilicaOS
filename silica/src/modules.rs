@@ -21,7 +21,7 @@ use xmas_elf::{
     sections::SectionData,
 };
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 /// Initcall execution levels, matching Linux kernel boot stages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

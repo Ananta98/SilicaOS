@@ -5,14 +5,18 @@
 //! Implements `exit1` for process termination, zombie state transitions,
 //! orphan reparenting to designated reapers, and resource reclamation via `proc_reap`.
 
-use alloc::{sync::Arc, vec::Vec};
-use crate::errno::{Errno, Result};
 use super::{
     ExitStatus, Proc, ProcState,
-    signal::Signal,
     thread::{Thread, ThreadState},
-    tree::{PID_ALLOCATOR, Pid, allproc_find, allproc_remove, tree_find_reaper, tree_reparent_children},
+    tree::{
+        PID_ALLOCATOR, Pid, allproc_find, allproc_remove, tree_find_reaper, tree_reparent_children,
+    },
 };
+use crate::api::{
+    errno::{Errno, Result},
+    signal::Signal,
+};
+use alloc::{sync::Arc, vec::Vec};
 
 /// FreeBSD `exit1`: terminates the current process.
 pub fn exit1(td: &Thread, status: ExitStatus) {
@@ -43,8 +47,7 @@ pub fn exit1(td: &Thread, status: ExitStatus) {
     if !children_to_reparent.is_empty() {
         tree_reparent_children(&children_to_reparent, reaper_pid);
         for &child_pid in &children_to_reparent {
-            let is_zombie = allproc_find(child_pid)
-                .is_some_and(|c| c.state() == ProcState::Zombie);
+            let is_zombie = allproc_find(child_pid).is_some_and(|c| c.state() == ProcState::Zombie);
             if is_zombie && let Some(reaper) = allproc_find(reaper_pid) {
                 reaper.post_signal(Signal::SIGCHLD);
                 super::wait::notify_child_events();
@@ -72,6 +75,11 @@ pub fn exit1(td: &Thread, status: ExitStatus) {
     for thread in &threads {
         thread.inner.lock().state = ThreadState::Dead;
     }
+
+    // Report the status so a process's end is visible in the log. Nothing else
+    // does: the zombie keeps `xstat` until a parent reaps it, and a process with
+    // no parent is never reaped at all.
+    ostd::info!("proc: pid {} exited ({})", proc.pid, status);
 }
 
 /// Frees zombie metadata and removes process from `allproc`.

@@ -16,7 +16,7 @@ use super::{
     font::FONT_HEIGHT,
     pixel::{Color, PixelFormat},
 };
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 /// A physical or virtual linear framebuffer display device.
 pub struct Framebuffer {

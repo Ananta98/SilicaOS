@@ -1,4 +1,4 @@
-use crate::errno::Result;
+use crate::api::errno::Result;
 use crate::fs::vfs::{FileOps, NodeOps, OpenFlags};
 use alloc::{boxed::Box, sync::Arc};
 

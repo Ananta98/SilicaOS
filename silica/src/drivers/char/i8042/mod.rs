@@ -15,7 +15,7 @@ pub use keyboard::KeyboardDevice;
 pub use mouse::MouseDevice;
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 

@@ -38,7 +38,7 @@ use ostd::mm::{UFrame, io::util::HasVmReaderWriter};
 use ostd::sync::SpinLock;
 
 use crate::{
-    errno::Result,
+    api::errno::Result,
     vm::backing::{Backing, alloc_zeroed_frame},
 };
 
@@ -174,8 +174,8 @@ fn check_name(name: &str) -> Result<()> {
 
 /// Creates a new named object of `size` bytes.
 ///
-/// Returns [`crate::errno::Errno::EEXIST`] if the name is already taken, and
-/// [`crate::errno::Errno::EINVAL`] if `size` is zero.
+/// Returns [`crate::api::errno::Errno::EEXIST`] if the name is already taken, and
+/// [`crate::api::errno::Errno::EINVAL`] if `size` is zero.
 pub fn create(name: &str, size: usize) -> Result<Arc<SharedPages>> {
     check_name(name)?;
     let object = SharedPages::new(size)?;
@@ -190,7 +190,7 @@ pub fn create(name: &str, size: usize) -> Result<Arc<SharedPages>> {
 
 /// Opens an existing named object.
 ///
-/// Returns [`crate::errno::Errno::ENOENT`] if no such object exists.
+/// Returns [`crate::api::errno::Errno::ENOENT`] if no such object exists.
 pub fn open(name: &str) -> Result<Arc<SharedPages>> {
     check_name(name)?;
 
@@ -209,7 +209,7 @@ pub fn open(name: &str) -> Result<Arc<SharedPages>> {
 ///
 /// The object itself survives until its last mapping is unmapped.
 ///
-/// Returns [`crate::errno::Errno::ENOENT`] if no such object exists.
+/// Returns [`crate::api::errno::Errno::ENOENT`] if no such object exists.
 pub fn unlink(name: &str) -> Result<()> {
     check_name(name)?;
 

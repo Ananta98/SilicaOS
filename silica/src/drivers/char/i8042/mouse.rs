@@ -24,7 +24,7 @@ use super::{
         reset_mouse, send_mouse_cmd, send_mouse_cmd_arg,
     },
 };
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 const ISA_MOUSE_IRQ: u8 = 12;
 

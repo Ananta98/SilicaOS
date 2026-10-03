@@ -2,7 +2,7 @@
 
 use ostd::arch::cpu::context::UserContext;
 use crate::{
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     proc::{fork::fork1, thread::Thread},
 };
 

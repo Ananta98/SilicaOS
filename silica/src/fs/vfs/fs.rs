@@ -3,7 +3,7 @@
 //! Core FileSystem trait for the VFS.
 
 use alloc::sync::Arc;
-use crate::errno::Result;
+use crate::api::errno::Result;
 use super::inode::INode;
 
 /// The common trait implemented by every mounted filesystem driver in SilicaOS.

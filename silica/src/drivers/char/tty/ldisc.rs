@@ -13,7 +13,7 @@ use crate::api::termios::{
     winsize, Termios, ECHO, ECHOK, ICANON, ICRNL, IGNCR, INLCR, ISIG, VEOF, VEOL, VERASE, VINTR,
     VKILL, VQUIT, VSUSP,
 };
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 use crate::proc::thread::Thread;
 
 /// Internal state of the line discipline

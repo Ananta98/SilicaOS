@@ -4,7 +4,7 @@
 
 use alloc::vec;
 use crate::{
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     fs::vfs::Mode,
 };
 

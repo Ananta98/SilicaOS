@@ -20,7 +20,7 @@ pub use superblock::{EXT2_SUPER_MAGIC, SuperBlock};
 
 use crate::{
     drivers::block::BlockDevice,
-    errno::Result,
+    api::errno::Result,
     fs::{
         registry::{FileSystemType, register_filesystem_type},
         vfs::FileSystem,

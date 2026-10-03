@@ -2,7 +2,7 @@
 
 //! Ext2 Superblock parsing and validation.
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 /// Standard Ext2 filesystem magic number (`0xEF53`).
 pub const EXT2_SUPER_MAGIC: u16 = 0xEF53;

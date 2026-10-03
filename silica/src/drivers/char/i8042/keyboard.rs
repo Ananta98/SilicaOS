@@ -20,7 +20,7 @@ use super::{
     controller::{I8042_CONTROLLER, I8042Controller, StatusFlags},
     ps2::{CMD_ENABLE_SCANNING, CMD_RESET, send_keyboard_cmd},
 };
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 const ISA_KEYBOARD_IRQ: u8 = 1;
 

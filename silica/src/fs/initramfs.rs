@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 use crate::fs::vfs::{
     FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags, SeekAnchor,
 };

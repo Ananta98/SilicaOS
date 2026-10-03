@@ -5,7 +5,7 @@
 use alloc::sync::Arc;
 use bitflags::bitflags;
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 use super::dcache::DEntry;
 use super::file::{File, OpenFlags};
 use super::mount::PathNode;

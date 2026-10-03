@@ -18,7 +18,7 @@ pub use fs::ExFatFs;
 
 use crate::{
     drivers::block::BlockDevice,
-    errno::Result,
+    api::errno::Result,
     fs::{
         registry::{FileSystemType, register_filesystem_type},
         vfs::FileSystem,

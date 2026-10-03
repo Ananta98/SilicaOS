@@ -5,7 +5,7 @@
 use alloc::sync::Arc;
 use spin::RwLock;
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 use super::dcache::DEntry;
 use super::fs::FileSystem;
 

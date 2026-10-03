@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 use crate::fs::vfs::{FileOps, NodeOps, OpenFlags};
 
 /// /dev/zero - Discards all writes, reads return infinite zero-bytes.

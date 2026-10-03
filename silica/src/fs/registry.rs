@@ -16,7 +16,7 @@ use spin::Mutex;
 
 use crate::{
     drivers::block::{get_block_device, list_block_devices, BlockDevice},
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     fs::vfs::{
         dcache::DEntry,
         lookup,

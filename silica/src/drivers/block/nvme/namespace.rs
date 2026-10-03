@@ -20,7 +20,7 @@ use super::{
 };
 use crate::{
     drivers::{Device, DeviceType, block::BlockDevice},
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
 };
 
 /// Represents an active NVMe Namespace that provides block-level I/O.

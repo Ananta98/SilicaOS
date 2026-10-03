@@ -8,26 +8,24 @@
 use alloc::sync::{Arc, Weak};
 use ostd::{sync::SpinLock, task::TaskOptions};
 
+use crate::fs::fd::Filedesc;
 use crate::{
-    errno::Result,
+    api::{
+        cred::Ucred,
+        errno::Result,
+        limit::Plimit,
+        signal::{SigActs, SigQueue, SigSet},
+    },
     proc::{
         Proc,
-        cred::Ucred,
-        limit::Plimit,
-        signal::SigActs,
         thread::{Thread, ThreadFlags, ThreadInner, ThreadState, alloc_tid},
         tree::{PID_ALLOCATOR, allproc_insert},
     },
     vm::vmar::Vmar,
 };
-use crate::fs::fd::Filedesc;
 
 /// Spawns a dedicated kernel process (e.g. `pagedaemon`, `bufdaemon`).
-pub fn kproc_create(
-    name: &str,
-    entry: fn(),
-    nice: i8,
-) -> Result<Arc<Proc>> {
+pub fn kproc_create(name: &str, entry: fn(), nice: i8) -> Result<Arc<Proc>> {
     let pid = PID_ALLOCATOR.lock().allocate()?;
     let vmar = Vmar::new();
     let fd_table = Arc::new(SpinLock::new(Filedesc::new()));
@@ -53,12 +51,7 @@ pub fn kproc_create(
 }
 
 /// Adds and starts a kernel thread belonging to a kernel process.
-pub fn kthread_add(
-    proc: &Arc<Proc>,
-    name: &str,
-    entry: fn(),
-    nice: i8,
-) -> Result<Arc<Thread>> {
+pub fn kthread_add(proc: &Arc<Proc>, name: &str, entry: fn(), nice: i8) -> Result<Arc<Thread>> {
     let tid = alloc_tid();
     let vmar = proc.vmspace();
     let proc_weak = Arc::downgrade(proc);
@@ -82,8 +75,8 @@ pub fn kthread_add(
             inner: SpinLock::new(ThreadInner {
                 state: ThreadState::CanRun,
                 flags: ThreadFlags::TDF_KTHREAD,
-                sigmask: super::signal::SigSet::empty(),
-                sigqueue: super::signal::SigQueue::new(),
+                sigmask: SigSet::empty(),
+                sigqueue: SigQueue::new(),
                 wchan: None,
                 wmesg: "",
                 name: name_buf,

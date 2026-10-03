@@ -16,7 +16,7 @@ pub use null::NullFile;
 pub use zero::ZeroFile;
 
 use crate::{
-    errno::Result,
+    api::errno::Result,
     fs::vfs::{FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags},
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};

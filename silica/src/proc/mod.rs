@@ -3,41 +3,44 @@
 //! Process management subsystem (FreeBSD `sys/proc.h`, `kern_proc.c`).
 //!
 //! Provides the process control block ([`Proc`]), lifecycle state machine,
-//! address space bindings, credentials, and hierarchy relationships.
+//! address space bindings, and hierarchy relationships.
 //!
 //! [`Proc`] holds no lifecycle logic of its own beyond the accessors that keep
 //! its fields coherent; the operations on a process live in the modules that
 //! mirror the FreeBSD kernel file they come from ([`fork`], [`exec`], [`exit`],
 //! [`wait`], [`kthread`], [`init`]). [`tree`] owns the global process table and
 //! the lock order that goes with it.
+//!
+//! The shapes a process exposes to user space are not here: credentials,
+//! resource limits and signal dispositions are ABI, and belong in [`crate::api`]
+//! alongside their syscall definitions. This module uses them.
 
-pub mod cred;
-pub mod limit;
-pub mod signal;
-pub mod tree;
-pub mod thread;
-pub mod exit;
-pub mod wait;
-pub mod kthread;
-pub mod fork;
 pub mod exec;
+pub mod exit;
+pub mod fork;
 pub mod init;
+pub mod kthread;
+pub mod thread;
+pub mod tree;
+pub mod wait;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use ostd::sync::SpinLock;
 
-use crate::{
-    errno::Result,
-    vm::vmar::Vmar,
-};
 use self::{
-    cred::Ucred,
-    limit::Plimit,
-    signal::{SigActs, SigQueue, Signal},
     thread::{Thread, Tid},
     tree::Pid,
 };
-use crate::fs::fd::Filedesc;
+use crate::{
+    api::{
+        cred::Ucred,
+        errno::Result,
+        limit::Plimit,
+        signal::{SigActs, SigHandler, SigQueue, SigSet, Signal},
+    },
+    fs::fd::Filedesc,
+    vm::vmar::Vmar,
+};
 
 /// The width of a process command name, including the NUL terminator that
 /// terminates a shorter name.
@@ -76,12 +79,28 @@ pub enum ExitStatus {
     Continued,
 }
 
+impl core::fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Exited(code) => write!(f, "exit code {code}"),
+            Self::Signaled { signal, core_dumped } => {
+                write!(f, "signal {} (core {})", signal.as_u32(), u8::from(*core_dumped))
+            }
+            Self::Stopped(signal) => write!(f, "stopped by signal {}", signal.as_u32()),
+            Self::Continued => f.write_str("continued"),
+        }
+    }
+}
+
 impl ExitStatus {
     /// Formats as standard POSIX wait status integer.
     pub fn as_raw(&self) -> i32 {
         match *self {
             ExitStatus::Exited(code) => (code & 0xff) << 8,
-            ExitStatus::Signaled { signal, core_dumped } => {
+            ExitStatus::Signaled {
+                signal,
+                core_dumped,
+            } => {
                 let sig = signal.as_u32() as i32 & 0x7f;
                 let core = if core_dumped { 0x80 } else { 0 };
                 sig | core
@@ -242,7 +261,7 @@ impl Proc {
     /// `TDF_ASTPENDING` so `UserMode::execute` returns at an AST point.
     pub fn post_signal(&self, signal: Signal) {
         // Discard if ignored
-        if self.sigacts.lock().get(signal).sa_handler == signal::SigHandler::Ignore {
+        if self.sigacts.lock().get(signal).sa_handler == SigHandler::Ignore {
             return;
         }
 
@@ -260,14 +279,22 @@ impl Proc {
 
         // If all threads mask it, set AST pending on all threads anyway
         for thread in inner.threads.iter() {
-            thread.inner.lock().flags.insert(thread::ThreadFlags::TDF_ASTPENDING);
+            thread
+                .inner
+                .lock()
+                .flags
+                .insert(thread::ThreadFlags::TDF_ASTPENDING);
         }
     }
 
     /// Returns the command name.
     pub fn comm_name(&self) -> String {
         let inner = self.inner.lock();
-        let len = inner.comm.iter().position(|&b| b == 0).unwrap_or(inner.comm.len());
+        let len = inner
+            .comm
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(inner.comm.len());
         String::from_utf8_lossy(&inner.comm[..len]).into_owned()
     }
 }
@@ -287,16 +314,7 @@ pub fn create_init_process_with_vmar(vmar: Arc<Vmar>) -> Result<Arc<Proc>> {
     let limit = Arc::new(Plimit::default_limits());
     let sigacts = Arc::new(SpinLock::new(SigActs::new()));
 
-    let proc = Proc::new(
-        pid,
-        None,
-        vmar,
-        fd_table,
-        cred,
-        limit,
-        sigacts,
-        "init",
-    );
+    let proc = Proc::new(pid, None, vmar, fd_table, cred, limit, sigacts, "init");
 
     tree::allproc_insert(Arc::clone(&proc));
     Ok(proc)
@@ -335,8 +353,8 @@ pub fn create_user_thread(
             inner: SpinLock::new(thread::ThreadInner {
                 state: thread::ThreadState::CanRun,
                 flags: thread::ThreadFlags::empty(),
-                sigmask: signal::SigSet::empty(),
-                sigqueue: signal::SigQueue::new(),
+                sigmask: SigSet::empty(),
+                sigqueue: SigQueue::new(),
                 wchan: None,
                 wmesg: "",
                 name: name_buf,

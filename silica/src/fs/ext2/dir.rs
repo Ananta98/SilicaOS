@@ -3,7 +3,7 @@
 //! Ext2 Directory structure and parsing.
 
 use alloc::{string::String, vec::Vec};
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 /// Parsed Ext2 directory entry.
 #[derive(Clone, Debug)]

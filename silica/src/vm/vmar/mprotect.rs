@@ -6,7 +6,7 @@ use core::ops::Range;
 
 use ostd::mm::Vaddr;
 
-use crate::{errno::Result, vm::perms::VmPerms};
+use crate::{api::errno::Result, vm::perms::VmPerms};
 
 use super::{Vmar, check_page_aligned_range, is_mappable_range};
 

@@ -6,9 +6,18 @@
 //! module:
 //!
 //! - [`arch`]: architecture-specific bring-up.
-//! - [`errno`]: the POSIX error numbers that subsystems report.
-//! - [`vm`]: virtual memory management, i.e. the mappings of an address space.
+//! - [`api`]: the types and constants user space sees — `errno` numbers, `uid`
+//!   and `gid`, resource limits, signal dispositions, `termios`, `ioctl`
+//!   requests. Layout-sensitive, so it changes with the ABI rather than with
+//!   kernel logic.
+//! - [`cmdline`]: the kernel command line.
+//! - [`drivers`]: device drivers.
+//! - [`fs`]: filesystems and the virtual file system.
+//! - [`modules`]: loadable kernel modules and their initcalls.
+//! - [`proc`]: processes, threads, and their lifecycle.
 //! - [`sched`]: task scheduling.
+//! - [`syscall`]: the system call table and dispatch.
+//! - [`vm`]: virtual memory management, i.e. the mappings of an address space.
 //!
 //! [`arch`]: arch
 
@@ -30,7 +39,6 @@ pub mod arch;
 pub mod api;
 pub mod cmdline;
 pub mod drivers;
-pub mod errno;
 pub mod fs;
 pub mod modules;
 pub mod proc;
@@ -41,6 +49,11 @@ pub mod vm;
 
 #[ostd::main]
 fn kernel_main() {
+    // Parse the kernel command line before anything reads it. `init=` and
+    // `rdinit=` choose the first user process, so this has to happen before
+    // `proc::init` looks for a binary.
+    cmdline::init(&ostd::boot::boot_info().kernel_cmdline);
+
     arch::init();
     vm::init();
     fs::init();

@@ -2,7 +2,7 @@
 
 use ostd::{arch::cpu::context::UserContext, mm::FallibleVmWrite};
 use crate::{
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
     proc::thread::Thread,
 };
 

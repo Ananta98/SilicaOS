@@ -30,7 +30,7 @@ use crate::{
         block::register_block_device,
         bus::pci::{self, PciDevice},
     },
-    errno::{Errno, Result},
+    api::errno::{Errno, Result},
 };
 
 /// High-level NVMe Controller handle.

@@ -2,7 +2,7 @@
 
 //! Ext2 Block Group Descriptor structure and table management.
 
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 /// Size of an on-disk Ext2 Block Group Descriptor in bytes.
 pub const EXT2_BG_DESC_SIZE: usize = 32;

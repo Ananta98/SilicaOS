@@ -19,7 +19,7 @@ use bitflags::bitflags;
 
 use ostd::mm::PageFlags;
 
-use crate::errno::Result;
+use crate::api::errno::Result;
 
 bitflags! {
     /// The memory access permissions of a mapping.

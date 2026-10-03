@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 use crate::{
-    errno::Result,
+    api::errno::Result,
     fs::vfs::{FileOps, INodeAttr, Mode, NodeOps, OpenFlags},
 };
 

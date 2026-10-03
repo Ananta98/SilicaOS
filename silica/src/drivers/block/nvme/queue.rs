@@ -17,7 +17,7 @@ use super::{
     commands::{NvmeCqe, NvmeSqe},
     regs::{cq_doorbell_offset, sq_doorbell_offset},
 };
-use crate::errno::{Errno, Result};
+use crate::api::errno::{Errno, Result};
 
 pub const DEFAULT_QUEUE_SIZE: u16 = 64;
 

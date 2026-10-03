@@ -14,7 +14,7 @@ use crate::{
         cred::Ucred,
         errno::Result,
         limit::Plimit,
-        signal::{SigActs, SigQueue, SigSet},
+        signal::{SigActs, SigSet, SigStack},
     },
     proc::{
         Proc,
@@ -75,12 +75,17 @@ pub fn kthread_add(proc: &Arc<Proc>, name: &str, entry: fn(), nice: i8) -> Resul
             inner: SpinLock::new(ThreadInner {
                 state: ThreadState::CanRun,
                 flags: ThreadFlags::TDF_KTHREAD,
-                sigmask: SigSet::empty(),
-                sigqueue: SigQueue::new(),
+                sigmask: SigSet::initial(),
+                sigqueue: super::signal::SigQueue::new(),
                 wchan: None,
                 wmesg: "",
                 name: name_buf,
                 user_ctx: None,
+                altstack: SigStack::default(),
+                handler_mask: SigSet::empty(),
+                fs_base: 0,
+                stopped_by: None,
+                handler_frame: None,
             }),
         }
     });

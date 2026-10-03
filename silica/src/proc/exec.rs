@@ -263,6 +263,15 @@ pub fn load_and_setup(
     let vmar = Vmar::new();
     let entry_point = load_elf(&vmar, elf_data)?;
     let sp = setup_user_stack(&vmar, argv, envp, entry_point)?;
+
+    // Last, because the stack is mapped at a fixed address and `MAP_FIXED` will
+    // happily cover an existing mapping: installing the trampoline before the stack
+    // put the trampoline underneath it.
+    //
+    // Before anything can install a handler, though: a handler has to come back
+    // through it, and there is no vDSO to point `sa_restorer` at otherwise.
+    crate::arch::signal::install_trampoline(&vmar)?;
+
     Ok((vmar, entry_point, sp))
 }
 
@@ -298,6 +307,10 @@ pub fn kern_execve(td: &Thread, path: &str, argv: &[&str], envp: &[&str]) -> Res
         }
     }
 
+    // The new address space needs its own trampoline: the one in the old space
+    // went with it.
+    crate::arch::signal::install_trampoline(&new_vmar)?;
+
     // Swap process address space
     //
     // TODO: the task's own copy is not updated. `Arc<Vmar>` is also stashed as the
@@ -315,7 +328,14 @@ pub fn kern_execve(td: &Thread, path: &str, argv: &[&str], envp: &[&str]) -> Res
     user_ctx.set_instruction_pointer(entry_point);
     user_ctx.set_stack_pointer(sp);
 
-    // UserMode execution loop
-    td.user_loop(user_ctx);
+    // UserMode execution loop.
+    //
+    // TODO: this nests a second user loop inside the syscall that is supposed to
+    // replace the running program, and never returns. `execve` is not reachable
+    // from any syscall yet.
+    // The caller has only a `&Thread`, so the hooks cannot be built from the
+    // `Arc` they need. Executing with no hooks means no signal reaches this
+    // thread, which is acceptable only because nothing can get here yet.
+    td.user_loop(user_ctx, crate::proc::thread::ThreadHooks::empty());
     Ok(())
 }

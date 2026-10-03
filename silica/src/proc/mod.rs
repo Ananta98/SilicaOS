@@ -19,7 +19,9 @@ pub mod exec;
 pub mod exit;
 pub mod fork;
 pub mod init;
+pub mod job_control;
 pub mod kthread;
+pub mod signal;
 pub mod thread;
 pub mod tree;
 pub mod wait;
@@ -28,6 +30,7 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use ostd::sync::SpinLock;
 
 use self::{
+    signal::SigQueue,
     thread::{Thread, Tid},
     tree::Pid,
 };
@@ -36,7 +39,7 @@ use crate::{
         cred::Ucred,
         errno::Result,
         limit::Plimit,
-        signal::{SigActs, SigHandler, SigQueue, SigSet, Signal},
+        signal::{SigActs, SigInfo, SigSet, SigStack, Signal},
     },
     fs::fd::Filedesc,
     vm::vmar::Vmar,
@@ -126,6 +129,13 @@ pub struct ProcInner {
     pub xstat: Option<ExitStatus>,
     pub comm: [u8; COMM_LEN],
     pub is_reaper: bool,
+    /// The process group this process belongs to, if it has joined one.
+    pub pgid: Option<Pid>,
+    /// Set while the process is stopped, and cleared when it resumes.
+    ///
+    /// Distinct from [`Self::state`]: a stopped process is not a zombie and will
+    /// run again, which is exactly what a zombie will not do.
+    pub stop_status: Option<ExitStatus>,
 }
 
 /// Process Control Block (mirroring FreeBSD `struct proc`).
@@ -152,7 +162,7 @@ pub struct Proc {
     pub sigacts: Arc<SpinLock<SigActs>>,
 
     /// Process-wide pending signal queue.
-    pub sigqueue: SpinLock<SigQueue>,
+    pub sigqueue: SigQueue,
 }
 
 impl Proc {
@@ -181,13 +191,15 @@ impl Proc {
                 xstat: None,
                 comm: comm_from_name(comm_name),
                 is_reaper,
+                pgid: None,
+                stop_status: None,
             }),
             vmspace: SpinLock::new(vmspace),
             fd_table,
             cred: SpinLock::new(cred),
             limit: SpinLock::new(limit),
             sigacts,
-            sigqueue: SpinLock::new(SigQueue::new()),
+            sigqueue: SigQueue::new(),
         })
     }
 
@@ -249,41 +261,15 @@ impl Proc {
         inner.threads.first().cloned()
     }
 
-    /// Posts a signal to the process and alerts threads.
+    /// Sends a signal to this process, from the kernel.
     ///
-    /// TODO: this only sets `TDF_ASTPENDING`, and nothing outside `proc` reads
-    /// that flag -- `sched` tracks tasks by pointer identity and never inspects
-    /// thread state. A signal aimed at a thread that is currently *dequeued* is
-    /// therefore queued but never delivered, and one aimed at a process with no
-    /// threads is queued and dropped. Making delivery reliable needs a real wake
-    /// path: `ostd::sync::Waiter::new_pair` to publish a `Waker` a blocked thread
-    /// can be woken through, plus a `UserModeHooks::has_kernel_event` that reports
-    /// `TDF_ASTPENDING` so `UserMode::execute` returns at an AST point.
-    pub fn post_signal(&self, signal: Signal) {
-        // Discard if ignored
-        if self.sigacts.lock().get(signal).sa_handler == SigHandler::Ignore {
-            return;
-        }
-
-        self.sigqueue.lock().post(signal);
-
-        // Find a thread to wake or notify
-        let inner = self.inner.lock();
-        for thread in inner.threads.iter() {
-            let mut td_inner = thread.inner.lock();
-            if !td_inner.sigmask.contains(signal) {
-                td_inner.flags.insert(thread::ThreadFlags::TDF_ASTPENDING);
-                return;
-            }
-        }
-
-        // If all threads mask it, set AST pending on all threads anyway
-        for thread in inner.threads.iter() {
-            thread
-                .inner
-                .lock()
-                .flags
-                .insert(thread::ThreadFlags::TDF_ASTPENDING);
+    /// A convenience over [`Proc::send_signal`] for the callers inside the kernel
+    /// that do not have a `siginfo_t` of their own. Everything interesting --
+    /// queueing, choosing a thread, deciding the disposition -- happens there.
+    pub fn post_signal(&self, sig: Signal) {
+        let info = SigInfo::kernel(sig, crate::api::signal::code::KERNEL);
+        if let Err(err) = self.send_signal(info, 0) {
+            ostd::debug!("proc: {sig} to pid {} was not delivered: {err}", self.pid);
         }
     }
 
@@ -338,7 +324,8 @@ pub fn create_user_thread(
         let user_ctx_clone = user_ctx.clone();
         let options = ostd::task::TaskOptions::new(move || {
             if let Some(td) = weak_for_closure.upgrade() {
-                td.user_loop(user_ctx_clone);
+                let hooks = thread::ThreadHooks::new(&td);
+                td.user_loop(user_ctx_clone, hooks);
             }
         })
         .data(weak_for_task)
@@ -353,12 +340,17 @@ pub fn create_user_thread(
             inner: SpinLock::new(thread::ThreadInner {
                 state: thread::ThreadState::CanRun,
                 flags: thread::ThreadFlags::empty(),
-                sigmask: SigSet::empty(),
+                sigmask: SigSet::initial(),
                 sigqueue: SigQueue::new(),
                 wchan: None,
                 wmesg: "",
                 name: name_buf,
                 user_ctx: Some(user_ctx),
+                altstack: SigStack::default(),
+                handler_mask: SigSet::empty(),
+                fs_base: 0,
+                stopped_by: None,
+                handler_frame: None,
             }),
         }
     });

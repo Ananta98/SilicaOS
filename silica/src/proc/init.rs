@@ -7,6 +7,7 @@
 //! binds standard descriptors, and launches PID 1.
 
 use alloc::{string::String, sync::Arc};
+use ostd::arch::cpu::context::UserContext;
 use ostd::user::UserContextApi;
 
 use crate::{
@@ -66,7 +67,7 @@ pub fn spawn_init_process() -> Result<Arc<Proc>> {
     let proc = create_init_process_with_vmar(vmar)?;
 
     // 3. Set up user context
-    let mut user_ctx = ostd::arch::cpu::context::UserContext::default();
+    let mut user_ctx = UserContext::default();
     user_ctx.set_instruction_pointer(entry_point);
     user_ctx.set_stack_pointer(sp);
 

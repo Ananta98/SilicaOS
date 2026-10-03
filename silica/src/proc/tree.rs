@@ -154,6 +154,16 @@ pub fn allproc_remove(pid: Pid) -> Option<Arc<Proc>> {
     tree.allproc.remove(&pid)
 }
 
+/// Every process in `allproc`, in ascending order of identifier.
+///
+/// Holds the tree lock for as long as the returned iterator lives, so a caller
+/// must not block while holding it.
+pub fn allproc_iter() -> impl Iterator<Item = Arc<Proc>> {
+    let tree = PROCTREE_LOCK.read();
+    let procs: alloc::vec::Vec<Arc<Proc>> = tree.allproc.values().cloned().collect();
+    procs.into_iter()
+}
+
 /// Returns the number of processes in `allproc`.
 pub fn allproc_count() -> usize {
     let tree = PROCTREE_LOCK.read();

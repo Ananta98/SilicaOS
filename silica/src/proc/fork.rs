@@ -12,7 +12,7 @@ use ostd::{arch::cpu::context::UserContext, sync::SpinLock, task::TaskOptions};
 use crate::{
     api::{
         errno::{Errno, Result},
-        signal::{SigActs, SigQueue},
+        signal::{SigActs, SigSet, SigStack},
     },
     proc::{
         Proc,
@@ -75,7 +75,8 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
 
         let options = TaskOptions::new(move || {
             if let Some(td) = weak_td_clone.upgrade() {
-                td.user_loop(child_ctx_clone);
+                let hooks = super::thread::ThreadHooks::new(&td);
+                td.user_loop(child_ctx_clone, hooks);
             }
         })
         .data(weak_thread.clone())
@@ -92,11 +93,16 @@ pub fn fork1(caller_td: &Thread, caller_user_ctx: Option<&UserContext>) -> Resul
                 state: ThreadState::CanRun,
                 flags: ThreadFlags::empty(),
                 sigmask: caller_td_inner.sigmask,
-                sigqueue: SigQueue::new(),
+                sigqueue: super::signal::SigQueue::new(),
                 wchan: None,
                 wmesg: "",
                 name: caller_td_inner.name,
                 user_ctx: Some(child_ctx),
+                altstack: SigStack::default(),
+                handler_mask: SigSet::empty(),
+                fs_base: 0,
+                stopped_by: None,
+                handler_frame: None,
             }),
         }
     });

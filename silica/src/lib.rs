@@ -49,11 +49,7 @@ pub mod vm;
 
 #[ostd::main]
 fn kernel_main() {
-    // Parse the kernel command line before anything reads it. `init=` and
-    // `rdinit=` choose the first user process, so this has to happen before
-    // `proc::init` looks for a binary.
     cmdline::init(&ostd::boot::boot_info().kernel_cmdline);
-
     arch::init();
     vm::init();
     fs::init();

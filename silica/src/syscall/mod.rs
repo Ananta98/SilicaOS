@@ -114,15 +114,27 @@ macro_rules! impl_syscall_nums_and_dispatch_fn {
         /// `rflags` is deliberately left untouched. See the module documentation
         /// for why writing to it is expensive.
         ///
-        /// TODO: `rt_sigreturn` restores `rax`, `rflags` and the rest of the
-        /// register file from a saved `ucontext`, so the dispatch path must not
-        /// write them again. That needs a way for a handler to say that it has
-        /// taken over the register file, which this signature cannot express.
+        /// `rt_sigreturn` is special-cased above, because it restores the register
+        /// file itself. Every other syscall reports through `rax`.
         pub fn dispatch(ctx: &mut ostd::arch::cpu::context::UserContext) {
             let (sys_no, args) = {
                 let regs = ctx.general_regs();
                 (regs.rax, [regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9])
             };
+
+            // `rt_sigreturn` restores the whole register file from the frame the
+            // handler left behind. Writing a result over it afterwards would throw
+            // away everything the handler just returned to, so this one number is
+            // dispatched and then left alone.
+            if sys_no == SYS_RT_SIGRETURN {
+                // A failure here leaves the process with a half-restored register
+                // file, so it is reported through `rax` after all rather than
+                // unwinding into a state that cannot be described.
+                if let Err(err) = $crate::syscall::proc::sys_rt_sigreturn(ctx) {
+                    ctx.general_regs_mut().rax = err.to_posix_raw() as isize as usize;
+                }
+                return;
+            }
 
             let res = match sys_no {
                 $(

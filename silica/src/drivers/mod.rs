@@ -140,10 +140,6 @@ pub fn get_blkdevs() -> Vec<Arc<dyn BlockDevice>> {
 /// Initializes the driver subsystem and probes system buses.
 pub fn init() -> Result<()> {
     ostd::info!("Initializing driver subsystem...");
-    char::tty::init();
-    if let Err(e) = drm::init() {
-        ostd::warn!("Failed to initialize DRM/framebuffer subsystem: {:?}", e);
-    }
     bus::pci::init()?;
     Ok(())
 }

@@ -7,13 +7,4 @@
 //! emulation, and `/dev/fb0` character devices.
 
 pub mod framebuffer;
-
 pub use framebuffer::get_console;
-
-use crate::api::errno::Result;
-
-/// Initializes the display and framebuffer subsystem.
-pub fn init() -> Result<()> {
-    framebuffer::init()?;
-    Ok(())
-}

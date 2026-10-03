@@ -66,3 +66,14 @@ pub fn get_console() -> Option<&'static Mutex<FbConsole>> {
 pub fn get_framebuffer() -> Option<Arc<Framebuffer>> {
     FRAMEBUFFER.get().cloned()
 }
+
+// ----------------------------------------------------------------------------
+// Kernel Module Declaration via module! macro
+// ----------------------------------------------------------------------------
+
+crate::module!(
+    "DRM Framebuffer Subsystem",
+    "SilicaOS Team",
+    crate::modules::InitcallLevel::Device,
+    init
+);

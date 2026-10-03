@@ -15,14 +15,20 @@ pub use console::ConsoleFile;
 pub use null::NullFile;
 pub use zero::ZeroFile;
 
+use crate::fs::vfs::{
+    LookupFlags,
+    dcache::DEntry,
+    lookup,
+    mount::{Mount, PathNode, root},
+};
 use crate::{
     api::errno::Result,
     fs::vfs::{FileOps, FileSystem, INode, INodeAttr, Mode, NodeOps, OpenFlags, StatFs},
 };
+use alloc::string::String;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use blk::GenericBlkNodeOps;
 use chr::GenericChrNodeOps;
-use console::ConsoleNodeOps;
 use null::NullNodeOps;
 use zero::ZeroNodeOps;
 
@@ -57,13 +63,6 @@ impl NodeOps for DevFsDirOps {
                         | Mode::ROTH
                         | Mode::WOTH,
                     2,
-                )));
-            }
-            "console" => {
-                return Ok(Arc::new(INode::new(
-                    Box::new(ConsoleNodeOps),
-                    Mode::CHAR | Mode::RUSR | Mode::WUSR | Mode::WGRP | Mode::WOTH,
-                    3,
                 )));
             }
             _ => {}
@@ -143,7 +142,6 @@ impl FileOps for DevFsDirFileOps {
         out.extend_from_slice(b".\n..\n");
         out.extend_from_slice(b"null\n");
         out.extend_from_slice(b"zero\n");
-        out.extend_from_slice(b"console\n");
 
         for dev in crate::drivers::get_chrdevs() {
             out.extend_from_slice(dev.name().as_bytes());
@@ -206,3 +204,59 @@ impl FileSystem for DevFs {
         })
     }
 }
+
+/// Initializes DevFS and mounts it onto `/dev`.
+pub fn init() -> Result<()> {
+    let devfs = Arc::new(DevFs::new());
+    let dev_inode = devfs.root()?;
+    let root_node = root()?;
+
+    let target_node = match lookup(
+        root_node.clone(),
+        root_node.clone(),
+        "/dev",
+        LookupFlags::DIRECTORY,
+    ) {
+        Ok(node) => node,
+        Err(_) => {
+            let dev_node_ops = Box::new(crate::fs::initramfs::InitramfsDirNodeOps::new());
+            let dev_dir_inode = Arc::new(INode::new(
+                dev_node_ops,
+                Mode::DIR | Mode::RUSR | Mode::WUSR | Mode::XUSR | Mode::RGRP | Mode::ROTH,
+                998,
+            ));
+            let dev_dentry = Arc::new(DEntry::new(
+                String::from("dev"),
+                Some(dev_dir_inode),
+                Some(Arc::downgrade(&root_node.dentry)),
+            ));
+            root_node.dentry.add_child(dev_dentry.clone());
+            PathNode {
+                mount: root_node.mount.clone(),
+                dentry: dev_dentry,
+            }
+        }
+    };
+
+    let mount_dentry = Arc::new(DEntry::new(
+        String::from("dev"),
+        Some(dev_inode),
+        Some(Arc::downgrade(&target_node.dentry)),
+    ));
+    let dev_mount = Arc::new(Mount::new(Arc::clone(&mount_dentry), devfs));
+    target_node.mount(dev_mount)?;
+
+    ostd::info!("VFS: Mounted devfs on /dev");
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// Kernel Module Declaration via module! macro
+// ----------------------------------------------------------------------------
+
+crate::module!(
+    "Device Filesystem",
+    "SilicaOS Team",
+    crate::modules::InitcallLevel::Fs,
+    init
+);

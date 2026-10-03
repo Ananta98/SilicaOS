@@ -11,11 +11,12 @@ use console::Console;
 static CONSOLE: Once<Arc<Console>> = Once::new();
 
 /// Initialize the TTY subsystem
-pub fn init() {
+pub fn init() -> crate::api::errno::Result<()> {
     let console_dev = Arc::new(Console::new());
     let _ = CONSOLE.call_once(|| Arc::clone(&console_dev));
     register_chrdev(console_dev);
     ostd::info!("TTY subsystem initialized");
+    Ok(())
 }
 
 /// Returns the primary system console device.
@@ -29,3 +30,14 @@ pub fn handle_keyboard_char(ch: u8) {
         console.handle_input(ch);
     }
 }
+
+// ----------------------------------------------------------------------------
+// Kernel Module Declaration via module! macro
+// ----------------------------------------------------------------------------
+
+crate::module!(
+    "TTY Console Subsystem",
+    "SilicaOS Team",
+    crate::modules::InitcallLevel::Device,
+    init
+);
